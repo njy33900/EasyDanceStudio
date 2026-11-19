@@ -1,0 +1,20 @@
+MMDStudio/[Ll]ibrary/
+MMDStudio/[Tt]emp/
+MMDStudio/[Oo]bj/
+MMDStudio/[Ll]ogs/
+MMDStudio/[Uu]ser[Ss]ettings/
+MMDStudio/.vs/
+MMDStudio/*.csproj
+MMDStudio/*.sln*
+builds/
+artifacts/
+.local-work/
+test/
+
+# Local Python/editor caches and machine-specific files
+__pycache__/
+*.py[cod]
+.DS_Store
+Thumbs.db
+MMDStudio/[Mm]emoryCaptures/
+MMDStudio/[Rr]ecordings/
