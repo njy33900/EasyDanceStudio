@@ -36,6 +36,24 @@ namespace MmdStudio.Poc
             }
             if (path == null)
             {
+                var sceneUiReport = PocArguments.Value("-pocSceneUiReport");
+                var restoreReport = PocArguments.Value("-pocSceneRestoreReport");
+                var perfReport = PocArguments.Value("-pocScenePerfReport");
+                var sceneFile = PocArguments.Value("-sceneFile");
+                if (sceneUiReport != null || restoreReport != null || perfReport != null || Array.IndexOf(Environment.GetCommandLineArgs(), "-sceneUi") >= 0)
+                {
+                    var sceneUi = gameObject.AddComponent<MmdSceneWorkspace>(); sceneUi.Initialize();
+                    if (sceneUiReport != null) yield return gameObject.AddComponent<PocSceneUiProbe>().Run(sceneUi, sceneUiReport);
+                    else if (restoreReport != null) yield return gameObject.AddComponent<PocSceneRestoreProbe>().Run(sceneUi, restoreReport, sceneFile);
+                    else if (perfReport != null) yield return gameObject.AddComponent<PocScenePerformanceProbe>().Run(sceneUi, perfReport);
+                    else if (sceneFile != null) yield return sceneUi.OpenFrom(sceneFile);
+                    else if (PocArguments.Value("-pocPmx") != null)
+                    {
+                        yield return sceneUi.ApplyPickerResult(PocArguments.Value("-pocPmx"), true);
+                        if (PocArguments.Value("-pocVmd") != null) yield return sceneUi.ApplyPickerResult(PocArguments.Value("-pocVmd"), false);
+                    }
+                    yield break;
+                }
                 var workspace = gameObject.AddComponent<PocWorkspace>();
                 workspace.Initialize(!Application.isBatchMode, PocArguments.Value("-pocMotionMode") ?? "direct");
                 var recoveryReport = PocArguments.Value("-pocRecoveryReport");
@@ -45,7 +63,14 @@ namespace MmdStudio.Poc
                 var enduranceReport = PocArguments.Value("-pocPhysicsEnduranceReport");
                 var physicsReferenceReport = PocArguments.Value("-pocPhysicsReferenceReport");
                 var physicsLifecycleReport = PocArguments.Value("-pocPhysicsLifecycleReport");
-                if (physicsLifecycleReport != null)
+                var physicsFeatureReport = PocArguments.Value("-pocPhysicsFeatureReport");
+                var sceneReport = PocArguments.Value("-pocSceneReport");
+                var physicsRealReport = PocArguments.Value("-pocPhysicsRealMotionReport");
+                if (sceneReport != null)
+                    yield return gameObject.AddComponent<PocSceneProbe>().Run(sceneReport);
+                else if (physicsFeatureReport != null || physicsRealReport != null)
+                    yield return gameObject.AddComponent<PocPhysicsFeatureProbe>().Run(workspace, physicsFeatureReport ?? physicsRealReport, physicsRealReport != null);
+                else if (physicsLifecycleReport != null)
                     yield return gameObject.AddComponent<PocPhysicsLifecycleProbe>().Run(workspace, physicsLifecycleReport);
                 else if (physicsReferenceReport != null)
                     yield return gameObject.AddComponent<PocPhysicsReferenceProbe>().Run(workspace, physicsReferenceReport);

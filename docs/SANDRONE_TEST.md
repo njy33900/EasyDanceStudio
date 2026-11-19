@@ -17,7 +17,7 @@ The archive 【桑多涅】.zip contains only the original character and invitat
 
 test/Sandrone_Runtime contains a byte-identical copy of the original character PMX, tex/, spa/, skin.bmp, hair.bmp, toon_defo.bmp and the accompanying readme. Textures now resolve beside the PMX. SOURCE.json records the local source and file hashes; it is not a claim about the modified package's external provenance.
 
-Open builds/POC-06C-Mono/MmdStudioPoC.exe, use PMX 가져오기 to select the PMX under Sandrone_Runtime, then VMD 연결 to select a character motion such as the existing Whiplash [SMOOTH].vmd. Camera VMD is optional and is selected separately.
+Open out/debug/POC-06C-Mono/MmdStudioPoC.exe, use PMX 가져오기 to select the PMX under Sandrone_Runtime, then VMD 연결 to select a character motion such as the existing Whiplash [SMOOTH].vmd. Camera VMD is optional and is selected separately.
 
 For an automatic local preview, PowerShell 7 at repository root:
 

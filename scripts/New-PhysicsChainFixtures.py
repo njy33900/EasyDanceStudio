@@ -45,33 +45,44 @@ def write_model(path, variant):
     put('B4ffbbBBB', 0, 0, 0, 0, 1, 0, -1, -1, 0, 1, 0)
     text('')
     put('i', 3)
-    bones = [('センター', 10, -1), ('上半身', 10, 0),
-             ('pendulum', 8, 1), ('tip', 6, 2), ('ik_target', 6, 0)]
+    driven = variant.endswith('-driven')
+    bones = [('センター', 0, 10, 0, -1), ('上半身', 0, 10, 0, 0),
+             ('pendulum', 0, 8, 0, 1), ('tip', 0, 6, 0, 2), ('ik_target', 0, 6, 0, 0)]
+    if driven:
+        bones = [('センター', 0, 10, 0, -1), ('上半身', 0, 10, 0, 0),
+                 ('driver', .5, 9, 0, 0), ('pendulum', 1, 7, .5, 2),
+                 ('tip', 2, 5, 1, 3), ('ik_target', 2.5, 5, -.5, 0)]
     put('i', len(bones))
-    for i, (name, y, parent) in enumerate(bones):
+    for i, (name, x, y, z, parent) in enumerate(bones):
         text(name)
         text('bone_' + str(i))
-        vec(0, y, 0)
+        vec(x, y, z)
         flags = 0x1e
         if variant == 'append' and i == 2:
             flags |= 0x100
         if variant == 'ik' and i == 4:
+            flags |= 0x20
+        if variant == 'append-driven' and i == 2:
+            flags |= 0x100
+        if variant == 'ik-driven' and i == 5:
             flags |= 0x20
         put('biH', parent, i, flags)
         vec(0, -2, 0)
         if flags & 0x100:
             put('bf', 1, .5)
         if flags & 0x20:
-            put('bifi', 3, 16, .25, 1)
+            put('bifi', 4 if driven else 3, 32 if driven else 16, .25, 2 if driven else 1)
+            if driven:
+                put('bB', 3, 0)
             put('bB', 2, 0)
     put('ii', 0, 0)  # morphs, display frames
     put('i', 2)
-    for index, y in enumerate((10, 8)):
+    for index, y in enumerate((9, 7) if driven else (10, 8)):
         text('body_' + str(index))
         text('')
-        put('bBhB', index + 1, 0, 0, 0)  # bone, group, no contacts, sphere
+        put('bBhB', index + (2 if driven else 1), 0, 0, 0)  # bone, group, no contacts, sphere
         vec(.3, .3, .3)
-        vec(0, y, 0)
+        vec((.5 if index == 0 else 1) if driven else 0, y, .5 if driven and index else 0)
         vec()
         put('5fB', 1, .1, .1, 0, .5, index)  # kinetic then dynamic
     put('i', 0 if variant == 'free' else 1)
@@ -79,7 +90,7 @@ def write_model(path, variant):
         text('hinge')
         text('')
         put('Bbb', 0, 0, 1)
-        vec(0, 9, 0)
+        vec(.75, 8, .25) if driven else vec(0, 9, 0)
         vec()
         vec()  # locked translation minimum/maximum
         vec()
@@ -89,7 +100,7 @@ def write_model(path, variant):
         vec()
     path.write_bytes(data)
     return dict(path=str(path.resolve()), variant=variant, bytes=len(data),
-                sha256=hashlib.sha256(data).hexdigest(), bones=5, rigidBodies=2,
+                sha256=hashlib.sha256(data).hexdigest(), bones=len(bones), rigidBodies=2,
                 joints=0 if variant == 'free' else 1)
 
 
@@ -99,6 +110,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     entries = [write_model(args.output / (v + '.pmx'), v)
-               for v in ('free', 'joint', 'append', 'ik')]
+               for v in ('free', 'joint', 'append', 'ik', 'append-driven', 'ik-driven')]
     (args.output / 'manifest.json').write_text(json.dumps(entries, indent=2), encoding='utf-8')
     print('Generated', len(entries), 'original external PMX fixtures')

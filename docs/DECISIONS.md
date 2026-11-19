@@ -1,5 +1,20 @@
 # Decisions
 
+## ADR-015 — First-phase UI direction and scope trims (2026-11-19)
+
+- The workspace follows the agreed reference layout with a white, modern, minimal look (top bar with icon actions, scene explorer tree, rounded viewport card, stacked inspector sections, icon playback bar). Styling lives in a USS theme; icons are vector-drawn because no icon font ships with the Player.
+- Light and camera are scene explorer entries (spec 4.7) instead of an inspector tab.
+- File drag and drop (MMD-101) is dropped from the first phase by the user's decision; file pickers remain the import path.
+- No settings screen is shown until settings exist (P1); UI must not offer features that do not work (spec 4.7).
+- The transform gizmo (W/E/R, spec 4.8) is included in the first phase (user decision, implemented as MVP-10): world-axis move/rotate/scale drawn by UI Toolkit over the viewport.
+
+## ADR-014 — Bound physics validation and proceed toward the MVP
+
+- v0.1.0-poc is the preserved source baseline. Follow-up work starts on codex/physics-validation, preserving the normal physics-OFF preview.
+- Add non-collinear feature-enabled/disabled controls to prove append/IK excitation, and run the typed stateful service on the real supplied motion. Numerical replay remains distinct from independent physical accuracy or continuous visual signoff.
+- Once these bounded checks finish, the next product ticket is MVP-01 multi-character scene/shared clock, physics OFF. Do not keep delaying scene work for unrestricted physics research. Physics UI integration has separate seek/retirement/error/visual gates.
+- The complete P0 MVP scope and first scene-service acceptance criteria are fixed in MVP_SCOPE.md; later UI, background, graphics and save/restore requirements are retained.
+
 ## ADR-001 — Engine and first verification target (2026-11-18)
 
 - Unity: 6000.3.28f1, revision 8f082d2fe476, installed locally.

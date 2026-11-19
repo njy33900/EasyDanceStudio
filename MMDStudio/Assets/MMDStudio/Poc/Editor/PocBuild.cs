@@ -11,6 +11,11 @@ namespace MmdStudio.Poc
 {
     public static class PocBuild
     {
+        [Serializable] private sealed class BuildInfo
+        {
+            public string configuration, backend;
+            public bool developmentBuild;
+        }
         public static void BuildWindows()
         {
             var output = PocArguments.Value("-pocOutput");
@@ -64,6 +69,9 @@ namespace MmdStudio.Poc
                 graphics.ApplyModifiedPropertiesWithoutUndo();
             }
             var backendName = PocArguments.Value("-pocBackend") ?? "mono";
+            var configuration = (PocArguments.Value("-pocConfiguration") ?? "debug").ToLowerInvariant();
+            if (configuration != "debug" && configuration != "release")
+                throw new ArgumentException("-pocConfiguration must be debug or release.");
             if (backendName != "mono" && backendName != "il2cpp")
                 throw new ArgumentException("-pocBackend must be mono or il2cpp.");
             var previousBackend = PlayerSettings.GetScriptingBackend(NamedBuildTarget.Standalone);
@@ -76,14 +84,16 @@ namespace MmdStudio.Poc
                     scenes = new[] { scenePath },
                     locationPathName = output,
                     target = BuildTarget.StandaloneWindows64,
-                    options = BuildOptions.Development
+                    options = configuration == "debug" ? BuildOptions.Development : BuildOptions.None
                 });
                 if (report.summary.result != BuildResult.Succeeded)
                     throw new InvalidOperationException("Player build failed: " + report.summary.result);
             }
             finally { PlayerSettings.SetScriptingBackend(NamedBuildTarget.Standalone, previousBackend); }
             CopyThirdPartyNotices(Path.GetDirectoryName(output));
-            Debug.Log("POC_BUILD_SUCCESS " + backendName + " " + output);
+            File.WriteAllText(Path.Combine(Path.GetDirectoryName(output), "build-info.json"),
+                JsonUtility.ToJson(new BuildInfo { configuration = configuration, backend = backendName, developmentBuild = configuration == "debug" }, true));
+            Debug.Log("POC_BUILD_SUCCESS " + configuration + " " + backendName + " " + output);
         }
 
         private static void CopyThirdPartyNotices(string outputDirectory)

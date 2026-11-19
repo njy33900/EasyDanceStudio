@@ -1,4 +1,5 @@
 param(
+    [ValidateSet('Debug','Release')][string]$Configuration = 'Debug',
     [switch]$SkipBuild,
     [switch]$IncludeRealModels,
     [switch]$RetainSolverState,
@@ -11,19 +12,21 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($RetainAllSolverState) { $RetainSolverState = $true }
 $root = Split-Path $PSScriptRoot -Parent
+$outputRoot = Join-Path (Join-Path $root 'out') $Configuration.ToLowerInvariant()
 $artifacts = Join-Path $root 'artifacts\physics-chain'
-$exe = Join-Path $root 'builds\POC-06E-Mono\MmdStudioPoC.exe'
+$exe = Join-Path $outputRoot 'POC-06E-Mono\MmdStudioPoC.exe'
 if ($ContextCompare) {
     if ($RetainSolverState) { throw 'ContextCompare must use the unmodified runtime baseline' }
     $artifacts = Join-Path $root 'artifacts\physics-context'
-    $exe = Join-Path $root 'builds\POC-06F-Mono\MmdStudioPoC.exe'
+    $exe = Join-Path $outputRoot 'POC-06F-Mono\MmdStudioPoC.exe'
 }
 if ($Lifecycle) {
     if ($ContextCompare -or $RetainSolverState) { throw 'Lifecycle must run separately from diagnostic experiments' }
     $artifacts = Join-Path $root "artifacts\physics-lifecycle\$Backend"
-    $exe = Join-Path $root "builds\POC-06G-$Backend\MmdStudioPoC.exe"
+    $exe = Join-Path $outputRoot "POC-06G-$Backend\MmdStudioPoC.exe"
 }
 elseif ($Backend -ne 'Mono') { throw 'Only Lifecycle currently supports IL2CPP in this script' }
+if ($Configuration -eq 'Release') { $artifacts = Join-Path $artifacts 'release' }
 New-Item -ItemType Directory -Path $artifacts -Force | Out-Null
 
 function Invoke-HiddenProcess([string]$File, [string[]]$Arguments, [int]$TimeoutSeconds) {
@@ -48,7 +51,7 @@ function Invoke-HiddenProcess([string]$File, [string[]]$Arguments, [int]$Timeout
 if ($LASTEXITCODE -ne 0) { throw 'Fixture generation failed' }
 if (-not $SkipBuild) {
     $code = Invoke-HiddenProcess $Unity @('-batchmode', '-nographics', '-quit',
-        '-projectPath', (Join-Path $root 'MMDStudio'), '-executeMethod', 'MmdStudio.Poc.PocBuild.BuildWindows',
+        '-projectPath', (Join-Path $root 'MMDStudio'), '-pocConfiguration', $Configuration.ToLowerInvariant(), '-executeMethod', 'MmdStudio.Poc.PocBuild.BuildWindows',
         '-pocOutput', $exe, '-pocBackend', $Backend.ToLowerInvariant(), '-logFile', (Join-Path $artifacts 'poc-build.log')) 1800
     if ($code -ne 0) { throw "Build failed: $code" }
 }

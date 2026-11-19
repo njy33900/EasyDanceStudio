@@ -1,5 +1,19 @@
 # Stage 0 verification
 
+Build location convention: root out/debug/ or out/release/, selected with `-Configuration Debug|Release` (default Debug) on every build/launch script. See BUILD_OUTPUTS.md. Release verification evidence is placed in the corresponding artifacts directory's release/ subfolder.
+
+## MVP-02 multi-character UI
+
+Run `scripts/Invoke-SceneVerification.ps1 -Ui -Backend Mono` or IL2CPP; add `-SkipBuild` to reuse. Each backend passes 23 assertions using actual UI Toolkit submit/change events in the separate MVP-02 Player. The test briefly opens a normal non-batch application window to capture its own UI framebuffer and then closes. No desktop capture is used. Launch the user workspace with `scripts/Start-SceneStudio.ps1`. See SCENE_WORKSPACE_UI.md for exact coverage, layout verification and the preserved one-off morph-regression shutdown failure.
+
+## MVP-01 multi-character scene
+
+Run `scripts/Invoke-SceneVerification.ps1 -Backend Mono` or `-Backend IL2CPP`; add `-SkipBuild` to reuse. Separate actual Windows Players exercise Gene/Whiplash and Sandrone/a generated distinct VMD simultaneously, shared clocks/placement, failure recovery and resource retirement. Each backend passes 26 assertions, including a paused actual-frame regression. Reports/GPU images are isolated in artifacts/scene/<backend>. See MULTI_CHARACTER_SCENE.md. This is the scene service gate, not production multi-object UI completion.
+
+## Stateful feature and real-motion follow-up
+
+Run `scripts/Invoke-PhysicsFeatureVerification.ps1 -Backend Mono` (or IL2CPP) to build the separate POC-06H Player and test actual non-collinear append/IK excitation. Add `-RealMotion -Seconds full` on Mono for two complete stateful Whiplash replays per external model; `-SkipBuild` reuses the selected build. Reports are isolated in artifacts/physics-features/<backend>. Detailed thresholds and limitations: PHYSICS_FEATURE_VALIDATION.md. These checks do not enable normal UI physics or establish independent MMD physical fidelity.
+
 ## Automated verification (PowerShell 7)
 
 ```powershell
@@ -42,7 +56,7 @@ Physics checks require eight assertions per model: rigid bodies/joints, disabled
 Run the read-only inventory separately for either build:
 
 ```powershell
-python scripts/inspect_player_native.py --player builds/POC-06C-IL2CPP --report artifacts/il2cpp/native-inventory.json
+python scripts/inspect_player_native.py --player out/debug/POC-06C-IL2CPP --report artifacts/il2cpp/native-inventory.json
 ```
 
 Require x64 files, required exports and copied notices. This development PC has the required VC runtimes; clean-machine distribution is not verified. UI Toolkit/native dialogs need an interactive check because the batch suite skips UI construction. The final IL2CPP interactive test loaded Sandrone/Whiplash through Windows dialogs and paused successfully.
@@ -59,7 +73,7 @@ PowerShell, repository root. Unity must not already have this project open.
 
 ```powershell
 $unity = 'C:\Program Files\Unity\Hub\Editor\6000.3.28f1\Editor\Unity.exe'
-& $unity -batchmode -nographics -quit -projectPath "$PWD\MMDStudio" -executeMethod MmdStudio.Poc.PocBuild.BuildWindows -pocOutput "$PWD\builds\POC-06C-Mono\MmdStudioPoC.exe" -logFile "$PWD\artifacts\poc-build.log"
+& $unity -batchmode -nographics -quit -projectPath "$PWD\MMDStudio" -executeMethod MmdStudio.Poc.PocBuild.BuildWindows -pocOutput "$PWD\debug\POC-06C-Mono\MmdStudioPoC.exe" -logFile "$PWD\artifacts\poc-build.log"
 ```
 
 Require build exit code 0, POC_BUILD_SUCCESS log, and actual EXE.
@@ -67,7 +81,7 @@ Require build exit code 0, POC_BUILD_SUCCESS log, and actual EXE.
 ## Player smoke
 
 ```powershell
-$player = Start-Process "$PWD\builds\POC-06C-Mono\MmdStudioPoC.exe" -ArgumentList '-batchmode', '-screen-width', '640', '-screen-height', '360', '-pocSmokeReport', "$PWD\artifacts\poc-player.json", '-logFile', "$PWD\artifacts\poc-player.log" -PassThru -WindowStyle Hidden
+$player = Start-Process "$PWD\debug\POC-06C-Mono\MmdStudioPoC.exe" -ArgumentList '-batchmode', '-screen-width', '640', '-screen-height', '360', '-pocSmokeReport', "$PWD\artifacts\poc-player.json", '-logFile', "$PWD\artifacts\poc-player.log" -PassThru -WindowStyle Hidden
 $player.WaitForExit()
 $player.ExitCode
 Get-Content artifacts\poc-player.json

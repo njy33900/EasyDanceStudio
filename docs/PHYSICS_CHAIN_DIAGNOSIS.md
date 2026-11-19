@@ -14,7 +14,7 @@ pwsh -NoProfile -File scripts/Invoke-PhysicsChainVerification.ps1 -SkipBuild -In
 pwsh -NoProfile -File scripts/Invoke-PhysicsChainVerification.ps1 -SkipBuild -IncludeRealModels -RetainAllSolverState
 ```
 
-The script builds a separate Mono Windows Player in `builds/POC-06E-Mono`, generates original external PMX files under `artifacts/physics-chain/fixtures`, and runs the actual EXE. It does not use a local model, install a game plugin, or capture the desktop. Existing POC-06C interactive launchers remain unchanged with physics OFF. An initial sandboxed Unity build stalled at license initialization; its exact build process was stopped and the ordinary-permission build succeeded. The initial log is preserved as `poc-build-sandbox.log`.
+The script builds a separate Mono Windows Player in `out/debug/POC-06E-Mono`, generates original external PMX files under `artifacts/physics-chain/fixtures`, and runs the actual EXE. It does not use a local model, install a game plugin, or capture the desktop. Existing POC-06C interactive launchers remain unchanged with physics OFF. An initial sandboxed Unity build stalled at license initialization; its exact build process was stopped and the ordinary-permission build succeeded. The initial log is preserved as `poc-build-sandbox.log`.
 
 ## What is measured
 

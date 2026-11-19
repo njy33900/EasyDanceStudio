@@ -36,7 +36,7 @@ pwsh -NoProfile -File scripts/Invoke-PhysicsChainVerification.ps1 -Lifecycle -In
 pwsh -NoProfile -File scripts/Invoke-PhysicsChainVerification.ps1 -Lifecycle -IncludeRealModels -Backend IL2CPP
 ```
 
-Add `-SkipBuild` to repeat the corresponding Player. Outputs are isolated under `builds/POC-06G-<backend>` and `artifacts/physics-lifecycle/<backend>`. The script rejects stale reports, wrong backends, process/report failure and fewer than 20 assertions. Per-model reports/logs are under `traced/<case>`; the summary is `verification.json`. Fixtures remain outside Unity Assets/Git. No desktop capture or local LLM was used.
+Add `-SkipBuild` to repeat the corresponding Player. Outputs are isolated under `out/debug/POC-06G-<backend>` and `artifacts/physics-lifecycle/<backend>`. The script rejects stale reports, wrong backends, process/report failure and fewer than 20 assertions. Per-model reports/logs are under `traced/<case>`; the summary is `verification.json`. Fixtures remain outside Unity Assets/Git. No desktop capture or local LLM was used.
 
 ## Next gate
 

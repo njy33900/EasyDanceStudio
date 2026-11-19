@@ -58,7 +58,7 @@ pwsh -NoProfile -File scripts/Invoke-PhysicsChainVerification.ps1 -ContextCompar
 pwsh -NoProfile -File scripts/Invoke-PhysicsChainVerification.ps1 -SkipBuild -ContextCompare -IncludeRealModels
 ```
 
-- Separate successful Mono Windows build: `builds/POC-06F-Mono/MmdStudioPoC.exe`.
+- Separate successful Mono Windows build: `out/debug/POC-06F-Mono/MmdStudioPoC.exe`.
 - Final reports: `artifacts/physics-context/traced/<case>/report.json` and matching Player logs.
 - Summary: `artifacts/physics-context/verification.json`, including separate baseline parity, standalone parity and both identical-input experiment results.
 - Initial context-only run: `initial-context-trace/`; first identical-input run preserved in `first-identical-input-run/` before repeating.
