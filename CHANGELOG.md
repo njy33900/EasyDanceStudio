@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Added a runtime transform gizmo: W/E/R move/rotate/scale in world axes with a viewport mode bar, constant screen size, hover highlight and two-way inspector sync. Builds go to MVP-10-<backend>; all four Debug/Release × Mono/IL2CPP builds pass 95 UI and 9 restart assertions; Release performance re-measured at 568–646 FPS average.
+
+- Redesigned the workspace to a light, minimal layout: top-bar icon actions, scene explorer tree with light and camera entries, rounded viewport card with empty state, stacked inspector sections, icon playback bar and status hints; USS theme and vector icons. Drag and drop is out of first-phase scope. Builds go to MVP-08-<backend>; all four Debug/Release × Mono/IL2CPP builds pass 86 UI and 9 restart assertions.
+- Added the first-phase performance report (two characters with full VMD, stage, effects at 1080p: 565–701 FPS average on the development PC, 30 FPS target met) with a known-issues list, 20 clean shutdown-recurrence runs and a native inventory of all outputs.
+
+- Added .mmdscene projects: new/open/save/save-as and Ctrl+S, schema-1 JSON with relative paths and atomic save, validation that keeps the current scene on invalid files, skipped-and-listed missing assets, unsaved-change prompts for new/open/quit and -sceneFile launch. UI builds go to MVP-07-<backend>; Debug Mono/IL2CPP and Release Mono pass 86 UI assertions and a 9-assertion relaunch restore.
+
 - Added the inspector Graphics tab: FOV, saved views and view reset; directional light colour/intensity/direction and shadow quality; Bloom, Neutral tonemapping, exposure/contrast/saturation; background colour. Settings are a validated serializable state for upcoming scene files; post-processing uses a neutral priority volume over the template defaults. UI builds go to MVP-06-<backend>; Debug Mono/IL2CPP and Release Mono pass 73 actual UI Player assertions, including a rendered-frame exposure check.
 
 - Added viewport left-click picking (shared selection with the list, empty click clears), Space play/pause and Delete with a modal delete confirmation (Esc cancels; the inspector delete button uses the same dialog). UI builds go to MVP-05-<backend>; Debug Mono/IL2CPP and Release Mono pass 60 actual UI Player assertions.

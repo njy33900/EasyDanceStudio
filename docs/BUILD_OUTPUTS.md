@@ -6,7 +6,13 @@
 EasyDanceStudio/
   out/
     debug/
-      MVP-06-Mono/MmdStudioPoC.exe   (current workspace UI)
+      MVP-10-Mono/MmdStudioPoC.exe   (current workspace UI)
+      MVP-10-IL2CPP/MmdStudioPoC.exe
+      MVP-08-Mono/MmdStudioPoC.exe
+      MVP-08-IL2CPP/MmdStudioPoC.exe
+      MVP-07-Mono/MmdStudioPoC.exe
+      MVP-07-IL2CPP/MmdStudioPoC.exe
+      MVP-06-Mono/MmdStudioPoC.exe
       MVP-06-IL2CPP/MmdStudioPoC.exe
       MVP-05-Mono/MmdStudioPoC.exe
       MVP-05-IL2CPP/MmdStudioPoC.exe
@@ -18,6 +24,11 @@ EasyDanceStudio/
       MVP-02-IL2CPP/MmdStudioPoC.exe
       POC-06C-Mono/...
     release/
+      MVP-10-Mono/MmdStudioPoC.exe
+      MVP-10-IL2CPP/MmdStudioPoC.exe
+      MVP-08-Mono/MmdStudioPoC.exe
+      MVP-08-IL2CPP/MmdStudioPoC.exe   (first Release IL2CPP build)
+      MVP-07-Mono/MmdStudioPoC.exe
       MVP-06-Mono/MmdStudioPoC.exe
       MVP-05-Mono/MmdStudioPoC.exe
       MVP-04-Mono/MmdStudioPoC.exe
@@ -59,3 +70,9 @@ MVP-04 (2026-11-19): the UI verification and launcher now use MVP-04-<backend>. 
 MVP-05 (2026-11-19): the UI verification and launcher now use MVP-05-<backend>; Debug Mono, Debug IL2CPP and Release Mono pass 60 UI assertions each (VIEWPORT_SELECTION.md).
 
 MVP-06 (2026-11-19): the UI verification and launcher now use MVP-06-<backend>; Debug Mono, Debug IL2CPP and Release Mono pass 73 UI assertions each (GRAPHICS_CONTROLS.md).
+
+MVP-07 (2026-11-19): the UI verification and launcher now use MVP-07-<backend>; the UI verification also relaunches the Player to check scene restore. Debug Mono, Debug IL2CPP and Release Mono pass 86 + 9 assertions each (SCENE_PERSISTENCE.md).
+
+MVP-08/09 (2026-11-19): UI verification, the launcher and Invoke-ScenePerformance.ps1 use MVP-08-<backend>. All four Debug/Release × Mono/IL2CPP outputs were built and pass 86 UI + 9 restart assertions and the native inventory (PERFORMANCE_REPORT.md).
+
+MVP-10 (2026-11-19): UI verification, the launcher and Invoke-ScenePerformance.ps1 use MVP-10-<backend>; all four outputs pass 95 UI + 9 restart assertions and the native inventory (TRANSFORM_GIZMO.md).

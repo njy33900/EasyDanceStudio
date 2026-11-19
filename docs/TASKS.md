@@ -20,6 +20,31 @@
 - Final command: scripts/Invoke-PocVerification.ps1 -IncludePmx; exit 0. All four cases matched expected outcomes. Evidence: artifacts/poc-build.log, pmx-player.json/.png/.log, pmx-player-invalid.json, poc-verification.json. Windows UMTNativePlugin.dll and copied original license/notices present in out/debug/POC-01.
 - Limit: diagnostic CLI only, not a production file picker or recoverable user workflow. VMD playback, live physics, animated morph/IK, camera VMD, seeking and IL2CPP remain unverified. Stage 0 as a whole is NOT complete.
 
+## MVP-10 — Runtime transform gizmo (passed, 2026-11-19)
+
+- Scope: spec 4.2/4.8 W/E/R move/rotate/scale gizmo for the selected object, mode bar in the viewport, two-way inspector sync; completes MMD-107. Drawn with Painter2D over the viewport; screen-space hit-testing and dragging through SetPlacement.
+- Verification: Debug/Release × Mono/IL2CPP (out/<configuration>/MVP-10-<backend>) each pass 95 UI (86 + 9 gizmo) + 9 restart assertions and the native inventory; Release performance re-measured (568–646 FPS average, worst frame 6.2 ms). Screenshots scene-ui.png (move) and scene-ui-gizmo.png (rotate) inspected.
+- Limits: world axes only, no snapping/plane handles/undo; physical dragging not yet checked by a person.
+
+## MVP-09 — Integration and performance report (done, 2026-11-19)
+
+- Scope: spec 8.2 last item, NFR-03/04. New -pocScenePerfReport probe and scripts/Invoke-ScenePerformance.ps1: Gene + Sandrone with full Whiplash VMD, generated stage, basic effects, save/reopen, three measured passes at 1920×1080 with vsync off.
+- Results (RTX 4090 / Ryzen 7 9800X3D): Release Mono 565–573 FPS average, Release IL2CPP 617–701, Debug 562–593; lowest 1 % low 192 FPS; target 30 met everywhere. Scene open 1.8–2.4 s. One disturbed run excluded and repeated.
+- Stability: deformation probe repeated 20× (Debug/Release Mono), 20/20 clean exits; native inventory passes on all four outputs; UMTNativePlugin needs the unshipped VC++ runtime.
+- Evidence: artifacts/performance, artifacts/shutdown, artifacts/native. Report: PERFORMANCE_REPORT.md; KNOWN_ISSUES.md.
+
+## MVP-08 — Light, minimal workspace design (passed, 2026-11-19)
+
+- Scope: redesign to the agreed reference (white base, top bar icons, explorer tree with 조명/카메라, rounded viewport card with empty state, stacked 변형/모션/재질/그래픽 inspector, icon playback bar with 00:00.0 time, status hints). USS theme and Painter2D icons; light/camera replace the inspector tabs. Drag and drop dropped by decision.
+- Fixes found in screenshots: white root covering the 3D view, clipped numeric/dropdown text, icon/name overlap, float display noise.
+- Verification: Debug/Release × Mono/IL2CPP (first Release IL2CPP) each pass 86 UI + 9 restart assertions; screenshots inspected.
+
+## MVP-07 — .mmdscene save, open and new (passed, 2026-11-19)
+
+- Scope: MMD-112, spec 4.10/5.2. Toolbar project name with dirty marker, 새로 만들기/열기/저장/다른 이름으로, Ctrl+S; schema 1 JSON with objects, selection, view, graphics and timeline; relative paths; atomic save; validate-before-replace open; missing assets skipped and listed; unsaved prompts for new/open/quit; -sceneFile launch.
+- Verification: Debug Mono, Debug IL2CPP and Release Mono (out/<configuration>/MVP-07-<backend>) each pass 86 UI assertions (73 + 13) and a separate relaunched Player passes 9 restore assertions. Evidence: artifacts/scene-ui/<backend>/scene-ui.json, scene-restore.json/.png, project/*.mmdscene.
+- Limits: native dialogs exercised through result handlers only; synchronous load; no reconnection, recent files or auto-save; schema migration is a version check only.
+
 ## MVP-06 — Camera, light and basic graphics (passed, 2026-11-19)
 
 - Scope: MMD-108..110. Inspector 속성/그래픽 tabs; FOV, saved views (16), view reset; directional light colour/intensity/direction and shadow quality (off/1024/2048/4096); Bloom on/intensity, Neutral tonemapping, exposure/contrast/saturation; background colour.
@@ -52,7 +77,7 @@
 
 ## Next tickets
 
-1. MVP-06 Graphics tab (GRAPHICS_CONTROLS.md), MVP-05 picking/shortcuts (VIEWPORT_SELECTION.md), MVP-04 PMX background (STAGE_WORKFLOW.md) and MVP-03 viewport controls (VIEWPORT_CONTROLS.md) pass 73 actual UI Player assertions on Debug Mono/IL2CPP and Release Mono. Physical mouse/keyboard use and real third-party stage PMX files still need manual checks. Next: MVP-07 .mmdscene JSON save/open/new with relative paths, atomic save, missing-asset list and unsaved-change prompts (MMD-112, spec 4.10/5.2). Decide whether W/E/R gizmos are in the first release. Physics remains OFF; track the isolated morph-regression shutdown failure before release.
+1. First-phase features including the W/E/R gizmo (TRANSFORM_GIZMO.md) are implemented and verified on Debug/Release × Mono/IL2CPP (95 UI + 9 restart assertions), with the MVP-08 light UI (UI_DESIGN.md) and the MVP-09 performance report (PERFORMANCE_REPORT.md) and known issues (KNOWN_ISSUES.md). Remaining before calling the first phase done: manual checks by a person (mouse/keyboard incl. gizmo dragging, native dialogs, a real stage PMX), a clean-VM run with the VC++ runtime packaging decided, and one mid-range PC measurement. Physics remains OFF; track the isolated morph-regression shutdown failure before release.
 2. Expand morph/IK validation to direct group morphs, additional chains and another model; generic compatibility remains open.
 3. Test native dependencies on a clean Windows machine and harden asynchronous loading and malformed-input/resource-path validation.
 

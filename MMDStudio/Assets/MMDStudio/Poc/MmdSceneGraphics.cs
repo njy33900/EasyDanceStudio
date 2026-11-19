@@ -32,7 +32,7 @@ namespace MmdStudio.Poc
         public float bloomIntensity = .8f;
         public bool tonemapping;
         public float exposure, contrast, saturation;
-        public Color backgroundColor = new Color(.08f, .10f, .14f, 1);
+        public Color backgroundColor = new Color(.925f, .93f, .94f, 1); // matches the light viewport card
         public List<SavedView> savedViews = new List<SavedView>();
 
         public SceneGraphicsSettings Clone()

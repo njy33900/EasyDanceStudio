@@ -45,6 +45,7 @@ namespace MmdStudio.Poc
             File.WriteAllText(invalid, "invalid PMX"); File.WriteAllBytes(badVmd, new byte[64]);
             ui.Scene.AutomaticClock = false;
             ui.DeviceInput = false; // A real mouse over the test window must not move the camera.
+            ui.SuppressQuitPrompt = true; // Application.Quit at the end must not be blocked by unsaved changes.
             yield return null;
             try { Check("empty_scene_has_no_selection_highlight", !ui.HighlightVisible); }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
@@ -150,7 +151,115 @@ namespace MmdStudio.Poc
                 Check("selection_after_failure_clears_stale_failure_status", ui.Error.Length == 0 && !statusText.Contains("불러오지") && statusText.Contains(Path.GetFileNameWithoutExtension(a.ModelSource)));
                 Activate(ui.Root, "FrameAll");
                 PickingChecks(ui, a, b, stage);
+                GizmoChecks(ui, a);
                 GraphicsChecks(ui);
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+
+            // ----- MVP-07 project save/open/new -----
+            var project = Path.Combine(Path.GetDirectoryName(path), "project");
+            Directory.CreateDirectory(project);
+            foreach (var old in Directory.GetFiles(project)) File.Delete(old);
+            var sceneFile = Path.Combine(project, "scene.mmdscene");
+            var aModel = a.ModelSource; var bModel = b.ModelSource; var stageModel = stage.ModelSource;
+            string[] ids = null;
+            try
+            {
+                Check("unsaved_changes_marked_in_title", ui.Dirty && ui.ProjectPath == null && ui.Root.Q<Label>("ProjectTitle").text.EndsWith(" *"));
+                ui.SaveTo(sceneFile);
+                var saved = MmdSceneDocument.Read(sceneFile);
+                Check("save_writes_valid_scene_with_relative_paths", !ui.Dirty && ui.Root.Q<Label>("ProjectTitle").text == "scene.mmdscene" &&
+                    saved.sceneObjects.Count == 3 && saved.sceneObjects.All(item => !Path.IsPathRooted(item.assetPath) && item.assetPath.StartsWith("../")) &&
+                    saved.sceneObjects.Count(item => item.type == SceneObjectData.StageType && string.IsNullOrEmpty(item.motionPath)) == 1 &&
+                    saved.sceneObjects.Where(item => item.type == SceneObjectData.CharacterType).All(item => !string.IsNullOrEmpty(item.motionPath)) &&
+                    saved.sceneObjects.Select(item => MmdSceneDocument.Resolve(sceneFile, item.assetPath)).SequenceEqual(ui.Scene.Objects.Select(item => item.ModelSource), StringComparer.OrdinalIgnoreCase) &&
+                    saved.selectedId == ui.SelectedId && JsonUtility.ToJson(saved.graphics) == JsonUtility.ToJson(ui.Graphics.Settings) &&
+                    saved.timeline.loop == ui.Scene.Loop && saved.timeline.speed == ui.Scene.Speed);
+                Check("atomic_save_leaves_no_temporary_files", Directory.GetFiles(project).Length == 1);
+                Activate(ui.Root, "object-" + a.Id);
+                ui.Root.Q<Vector3Field>("Position").value = new Vector3(-2, 0, 0);
+                ui.Root.Q<Slider>("Exposure").value = 1;
+                Check("edits_mark_scene_dirty", ui.Dirty && ui.Root.Q<Label>("ProjectTitle").text == "scene.mmdscene *");
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return ui.OpenFrom(sceneFile);
+            try
+            {
+                var asked = ui.DialogVisible && ui.Root.Q<Button>("UnsavedDiscard") != null && ui.Root.Q<Button>("UnsavedSave") != null;
+                Activate(ui.Root, "UnsavedCancel");
+                Check("open_with_unsaved_changes_asks_and_cancel_keeps_scene", asked && !ui.DialogVisible && ui.Dirty && ui.Scene.Objects.Contains(a) &&
+                    a.Placement.localPosition == new Vector3(-2, 0, 0) && Near(ui.Graphics.Settings.exposure, 1));
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return ui.OpenFrom(sceneFile);
+            try { Activate(ui.Root, "UnsavedDiscard"); }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return null;
+            while (ui.Busy) yield return null;
+            try
+            {
+                a = Find(ui, MmdSceneService.ObjectKind.Character, aModel); b = Find(ui, MmdSceneService.ObjectKind.Character, bModel);
+                stage = Find(ui, MmdSceneService.ObjectKind.Stage, stageModel);
+                Check("discard_reopens_saved_state_exactly", !ui.Dirty && ui.Error.Length == 0 && ui.LastLoadProblems.Length == 0 && ui.Scene.Objects.Count == 3 &&
+                    a != null && b != null && stage != null && a.Placement.localPosition == new Vector3(-1, 0, .2f) &&
+                    Quaternion.Angle(a.Placement.localRotation, Quaternion.Euler(0, 20, 0)) < .01f && a.Placement.localScale == new Vector3(.9f, .9f, .9f) &&
+                    string.Equals(a.MotionSource, aSource, StringComparison.OrdinalIgnoreCase) && string.Equals(b.MotionSource, bSource, StringComparison.OrdinalIgnoreCase) &&
+                    stage.Placement.localPosition == new Vector3(0, -.05f, .5f) && stage.Placement.localScale == new Vector3(1.2f, 1.2f, 1.2f) && stage.Motion == null &&
+                    Near(ui.Graphics.Settings.exposure, 0) && ui.Graphics.Settings.bloomEnabled && ui.Graphics.Settings.tonemapping && ui.SelectedId == stage.Id &&
+                    ui.Scene.Duration == duration);
+                var broken = MmdSceneDocument.Read(sceneFile);
+                broken.sceneObjects.First(item => item.type == SceneObjectData.StageType).assetPath = "../nowhere/stage.pmx";
+                broken.sceneObjects.First(item => item.type == SceneObjectData.CharacterType).motionPath = "../nowhere/motion.vmd";
+                MmdSceneDocument.Write(Path.Combine(project, "missing.mmdscene"), broken);
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return ui.OpenFrom(Path.Combine(project, "missing.mmdscene"));
+            try
+            {
+                var first = ui.Scene.Objects.FirstOrDefault();
+                Check("missing_assets_skipped_listed_rest_restored", ui.DialogVisible && ui.LastLoadProblems.Length == 2 && ui.DialogText.Contains("nowhere") &&
+                    ui.Scene.Objects.Count == 2 && ui.Scene.Objects.All(item => item.Kind == MmdSceneService.ObjectKind.Character) &&
+                    first != null && first.Motion == null && ui.Scene.Objects[1].Motion != null);
+                Activate(ui.Root, "NoticeOk");
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return ui.OpenFrom(sceneFile);
+            try
+            {
+                a = Find(ui, MmdSceneService.ObjectKind.Character, aModel); b = Find(ui, MmdSceneService.ObjectKind.Character, bModel);
+                stage = Find(ui, MmdSceneService.ObjectKind.Stage, stageModel);
+                if (a == null || b == null || stage == null || ui.DialogVisible) throw new InvalidOperationException("clean reopen failed");
+                ids = ui.Scene.Objects.Select(item => item.Id).ToArray();
+                File.WriteAllText(Path.Combine(project, "corrupt.mmdscene"), "{ not json");
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return ui.OpenFrom(Path.Combine(project, "corrupt.mmdscene"));
+            try
+            {
+                Check("corrupt_file_rejected_and_scene_kept", ui.Error.Contains("열 수 없습니다") && ui.Scene.Objects.Select(item => item.Id).SequenceEqual(ids) &&
+                    string.Equals(ui.ProjectPath, Path.GetFullPath(sceneFile), StringComparison.OrdinalIgnoreCase));
+                File.WriteAllText(Path.Combine(project, "future.mmdscene"), File.ReadAllText(sceneFile).Replace("\"schemaVersion\": 1", "\"schemaVersion\": 99"));
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return ui.OpenFrom(Path.Combine(project, "future.mmdscene"));
+            try
+            {
+                Check("unsupported_schema_version_rejected_and_scene_kept", ui.Error.Contains("버전") && ui.Scene.Objects.Select(item => item.Id).SequenceEqual(ids));
+                ui.Root.Q<Slider>("Exposure").value = .5f;
+                var dirty = ui.Dirty;
+                Key(ui, save: true);
+                Check("ctrl_s_saves_to_current_file", dirty && !ui.Dirty && ui.Error.Length == 0 && Near(MmdSceneDocument.Read(sceneFile).graphics.exposure, .5f));
+                ui.Root.Q<Slider>("Exposure").value = 0;
+                var blocked = !ui.HandleQuitRequest() && ui.DialogVisible;
+                Activate(ui.Root, "UnsavedCancel");
+                Key(ui, save: true);
+                Check("quit_with_unsaved_changes_asks_then_allows_when_saved", blocked && !ui.DialogVisible && !ui.Dirty && ui.HandleQuitRequest());
+                ui.Root.Q<Toggle>("Loop").value = !ui.Scene.Loop; ui.Root.Q<Toggle>("Loop").value = !ui.Scene.Loop;
+                Activate(ui.Root, "NewScene");
+                var newAsked = ui.DialogVisible;
+                Activate(ui.Root, "UnsavedCancel");
+                Check("new_scene_prompt_cancel_keeps_scene", newAsked && ui.Scene.Objects.Count == 3 && ui.Dirty);
+                Key(ui, save: true);
                 Activate(ui.Root, "object-" + a.Id);
                 ui.Root.Q<Slider>("Timeline").value = .25f;
                 Activate(ui.Root, "FrameAll");
@@ -162,15 +271,23 @@ namespace MmdStudio.Poc
             try
             {
                 Check("application_ui_screenshot_created", File.Exists(report.screenshot));
-                Activate(ui.Root, "InspectorTabGraphics");
-                // Visual evidence of the Graphics tab (not an extra assertion).
+                Key(ui, gizmo: 2);
+                // Visual evidence of the rotate gizmo (not an extra assertion).
+                ScreenCapture.CaptureScreenshot(Path.Combine(Path.GetDirectoryName(path), "scene-ui-gizmo.png"));
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return new WaitForSecondsRealtime(.2f);
+            try
+            {
+                Key(ui, gizmo: 1);
+                Activate(ui.Root, "explorer-light");
+                // Visual evidence of the light/graphics inspector (not an extra assertion).
                 ScreenCapture.CaptureScreenshot(Path.Combine(Path.GetDirectoryName(path), "scene-ui-graphics.png"));
             }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
             yield return new WaitForSecondsRealtime(.2f);
             try
             {
-                Activate(ui.Root, "InspectorTabProperties");
                 Activate(ui.Root, "object-" + stage.Id);
                 Key(ui, delete: true);
                 // Visual evidence of the confirmation dialog (not an extra assertion).
@@ -190,6 +307,11 @@ namespace MmdStudio.Poc
                 RemoveSelected(ui);
                 Check("last_delete_clears_selection_and_disables_controls", ui.Scene.Objects.Count == 0 && ui.SelectedId == null && !ui.Root.Q<Button>("ConnectMotion").enabledSelf && !ui.Root.Q<Button>("PlayPause").enabledSelf);
                 Check("last_delete_hides_selection_highlight", !ui.HighlightVisible);
+                Activate(ui.Root, "NewScene");
+                var asked = ui.DialogVisible;
+                Activate(ui.Root, "UnsavedDiscard");
+                Check("new_scene_discard_resets_everything", asked && ui.Scene.Objects.Count == 0 && ui.ProjectPath == null && !ui.Dirty &&
+                    JsonUtility.ToJson(ui.Graphics.Settings) == JsonUtility.ToJson(new SceneGraphicsSettings()) && ui.Root.Q<Label>("ProjectTitle").text == "새 장면");
                 Finish(path, report, null);
             }
             catch (Exception ex) { Finish(path, report, ex.ToString()); }
@@ -205,8 +327,93 @@ namespace MmdStudio.Poc
             Frame(ui, screen, Vector2.zero, left: true);
             Frame(ui, screen, Vector2.zero);
         }
-        private static void Key(MmdSceneWorkspace ui, bool play = false, bool delete = false, bool cancel = false) =>
-            ui.ProcessViewportInput(new Vector2(-10, -10), Vector2.zero, 0, false, false, false, false, play, delete, cancel);
+        private static void Key(MmdSceneWorkspace ui, bool play = false, bool delete = false, bool cancel = false, bool save = false, int gizmo = 0) =>
+            ui.ProcessViewportInput(new Vector2(-10, -10), Vector2.zero, 0, false, false, false, false, play, delete, cancel, save, gizmo);
+        // Left-button drag through the given screen points (press at the first, release at the last).
+        private static void LeftDrag(MmdSceneWorkspace ui, params Vector2[] points)
+        {
+            Frame(ui, points[0], Vector2.zero, left: true);
+            for (var i = 1; i < points.Length; i++) Frame(ui, points[i], points[i] - points[i - 1], left: true);
+            Frame(ui, points[points.Length - 1], Vector2.zero);
+        }
+        private void GizmoChecks(MmdSceneWorkspace ui, MmdSceneService.SceneObject a)
+        {
+            var previousSelection = ui.SelectedId;
+            Activate(ui.Root, "object-" + a.Id);
+            var origin = ui.GizmoOriginScreen();
+            Check("gizmo_shown_at_selected_origin_in_move_mode", ui.GizmoVisible && ui.Gizmo == MmdSceneWorkspace.GizmoMode.Move &&
+                (origin - ScreenOf(a.Placement.position)).magnitude < .5f && ui.Root.Q<Button>("GizmoMove").ClassListContains("eds-gizmo-button--active"));
+
+            Vector2 Along(int axis, float fraction) { var o = ui.GizmoOriginScreen(); return o + (ui.GizmoAxisEndScreen(axis) - o) * fraction; }
+            var start = a.Placement.localPosition; var selected = ui.SelectedId;
+            var grab = Along(0, .7f); var direction = (ui.GizmoAxisEndScreen(0) - origin).normalized;
+            if (ui.GizmoHandleAt(grab) != 0) throw new InvalidOperationException("X move handle not under its own projection");
+            LeftDrag(ui, grab, grab + direction * 20, grab + direction * 40);
+            var moved = a.Placement.localPosition;
+            Check("gizmo_move_x_follows_pointer_and_syncs_inspector", moved.x > start.x + 1e-4f && Mathf.Abs(moved.y - start.y) < 1e-5f && Mathf.Abs(moved.z - start.z) < 1e-5f &&
+                (ScreenOf(a.Placement.position) - (origin + direction * 40)).magnitude < 3 && ui.SelectedId == selected && ui.Dirty &&
+                Near(ui.Root.Q<Vector3Field>("Position").value, moved, 1e-3f));
+
+            origin = ui.GizmoOriginScreen(); start = a.Placement.localPosition;
+            grab = Along(1, .7f); direction = (ui.GizmoAxisEndScreen(1) - origin).normalized;
+            if (ui.GizmoHandleAt(grab) != 1) throw new InvalidOperationException("Y move handle not under its own projection");
+            LeftDrag(ui, grab, grab + direction * 25);
+            moved = a.Placement.localPosition;
+            Check("gizmo_move_y_changes_only_height", moved.y > start.y + 1e-4f && Mathf.Abs(moved.x - start.x) < 1e-5f && Mathf.Abs(moved.z - start.z) < 1e-5f);
+
+            Key(ui, gizmo: 2);
+            var ringStart = ui.GizmoRingScreen(1, Mathf.PI * .75f);
+            var rotationStart = a.Placement.localRotation;
+            var rotateMode = ui.Gizmo == MmdSceneWorkspace.GizmoMode.Rotate && ui.Root.Q<Button>("GizmoRotate").ClassListContains("eds-gizmo-button--active");
+            if (ui.GizmoHandleAt(ringStart) != 1) throw new InvalidOperationException("Y ring not under its own projection");
+            LeftDrag(ui, ringStart, ui.GizmoRingScreen(1, Mathf.PI * .85f), ui.GizmoRingScreen(1, Mathf.PI * .95f));
+            (a.Placement.localRotation * Quaternion.Inverse(rotationStart)).ToAngleAxis(out var angle, out var axis);
+            Check("gizmo_rotate_y_ring_turns_about_up_axis", rotateMode && angle > 5 && Mathf.Abs(Vector3.Dot(axis.normalized, Vector3.up)) > .999f &&
+                Quaternion.Angle(Quaternion.Euler(ui.Root.Q<Vector3Field>("Rotation").value), a.Placement.localRotation) < .05f);
+
+            Key(ui, gizmo: 3);
+            var scaleStart = a.Placement.localScale; origin = ui.GizmoOriginScreen();
+            if (ui.GizmoHandleAt(origin) != MmdSceneWorkspace.UniformHandle) throw new InvalidOperationException("Uniform scale handle not at origin");
+            LeftDrag(ui, origin, origin + new Vector2(15, 15), origin + new Vector2(30, 30));
+            var scaled = a.Placement.localScale; var ratio = scaled.x / scaleStart.x;
+            Check("gizmo_uniform_scale_keeps_proportions", ui.Gizmo == MmdSceneWorkspace.GizmoMode.Scale && ratio > 1.2f &&
+                Mathf.Abs(scaled.y / scaleStart.y - ratio) < 1e-3f && Mathf.Abs(scaled.z / scaleStart.z - ratio) < 1e-3f &&
+                Near(ui.Root.Q<Vector3Field>("Scale").value, scaled, 1e-3f));
+            scaleStart = a.Placement.localScale; origin = ui.GizmoOriginScreen();
+            grab = Along(1, .8f); direction = (ui.GizmoAxisEndScreen(1) - origin).normalized;
+            if (ui.GizmoHandleAt(grab) != 1) throw new InvalidOperationException("Y scale handle not under its own projection");
+            LeftDrag(ui, grab, grab + direction * 20);
+            scaled = a.Placement.localScale;
+            Check("gizmo_axis_scale_changes_one_component", scaled.y > scaleStart.y * 1.05f && Mathf.Abs(scaled.x - scaleStart.x) < 1e-5f && Mathf.Abs(scaled.z - scaleStart.z) < 1e-5f);
+
+            ui.Root.Q<Vector3Field>("Position").value = new Vector3(-1.5f, 0, .4f);
+            Check("inspector_edit_moves_gizmo", (ui.GizmoOriginScreen() - ScreenOf(a.Placement.position)).magnitude < .5f && a.Placement.localPosition == new Vector3(-1.5f, 0, .4f));
+
+            ui.Root.Q<Vector3Field>("Position").Q<FloatField>().Focus();
+            Key(ui, gizmo: 1);
+            var stayed = ui.Gizmo == MmdSceneWorkspace.GizmoMode.Scale;
+            (ui.Root.panel.focusController.focusedElement as VisualElement)?.Blur();
+            Key(ui, gizmo: 1);
+            Check("gizmo_keys_switch_mode_except_while_typing", stayed && ui.Gizmo == MmdSceneWorkspace.GizmoMode.Move);
+
+            ui.Root.Q<Toggle>("Visible").value = false;
+            var hidden = !ui.GizmoVisible && ui.GizmoHandleAt(ui.GizmoOriginScreen()) < 0;
+            ui.Root.Q<Toggle>("Visible").value = true;
+            Activate(ui.Root, "explorer-light");
+            var light = !ui.GizmoVisible;
+            Activate(ui.Root, "object-" + a.Id);
+            Check("gizmo_absent_for_hidden_object_and_light", hidden && light && ui.GizmoVisible);
+
+            // Restore the placement the later persistence checks expect.
+            ui.Root.Q<Vector3Field>("Position").value = new Vector3(-1, 0, .2f);
+            ui.Root.Q<Vector3Field>("Rotation").value = new Vector3(0, 20, 0);
+            ui.Root.Q<Vector3Field>("Scale").value = new Vector3(.9f, .9f, .9f);
+            if (a.Placement.localPosition != new Vector3(-1, 0, .2f) || a.Placement.localScale != new Vector3(.9f, .9f, .9f))
+                throw new InvalidOperationException("Could not restore the placement after gizmo checks");
+            if (previousSelection != null) ui.Select(previousSelection);
+        }
+        private static MmdSceneService.SceneObject Find(MmdSceneWorkspace ui, MmdSceneService.ObjectKind kind, string model) =>
+            ui.Scene.Objects.FirstOrDefault(item => item.Kind == kind && string.Equals(item.ModelSource, model, StringComparison.OrdinalIgnoreCase));
         private static void RemoveSelected(MmdSceneWorkspace ui)
         {
             Activate(ui.Root, "RemoveModel");
@@ -264,9 +471,15 @@ namespace MmdStudio.Poc
                 graphics.Volume.sharedProfile.TryGet<Vignette>(out var vignette) && vignette.intensity.overrideState && vignette.intensity.value == 0 &&
                 graphics.Volume.sharedProfile.TryGet<FilmGrain>(out var grain) && grain.intensity.overrideState && grain.intensity.value == 0);
 
-            Activate(ui.Root, "InspectorTabGraphics");
-            Check("graphics_tab_replaces_properties_panel", ui.GraphicsTabVisible && ui.Root.Q("GraphicsPanel").style.display.value == DisplayStyle.Flex &&
-                ui.Root.Q("PropertiesPanel").style.display.value == DisplayStyle.None);
+            var previousSelection = ui.SelectedId;
+            bool Shown(string name) => ui.Root.Q(name).style.display.value != DisplayStyle.None;
+            Activate(ui.Root, "explorer-light");
+            var light = ui.Target == MmdSceneWorkspace.InspectorTarget.Light && ui.SelectedId == null && !ui.HighlightVisible &&
+                Shown("LightSection") && !Shown("CameraSection") && !Shown("TransformSection") && Shown("GraphicsSection") &&
+                ui.Root.Q<Button>("explorer-light").ClassListContains("eds-row--selected");
+            Activate(ui.Root, "explorer-camera");
+            Check("explorer_light_and_camera_entries_show_their_sections", light && ui.Target == MmdSceneWorkspace.InspectorTarget.Camera &&
+                Shown("CameraSection") && !Shown("LightSection") && ui.Root.Q<Label>("SelectionTitle").text == "카메라");
 
             ui.Root.Q<Slider>("Fov").value = 60;
             Check("fov_slider_sets_camera_field_of_view", Near(camera.fieldOfView, 60) && Near(graphics.Settings.fieldOfView, 60));
@@ -298,6 +511,8 @@ namespace MmdStudio.Poc
 
             ui.Root.Q<Toggle>("Tonemapping").value = false; ui.Root.Q<Slider>("Contrast").value = 0; ui.Root.Q<Slider>("Saturation").value = 0;
             ui.Root.Q<Slider>("Exposure").value = 0;
+            // A dark clear colour keeps the brighter frame from clipping at white on the light default.
+            ui.Root.Q<Slider>("BackgroundR").value = .08f; ui.Root.Q<Slider>("BackgroundG").value = .1f; ui.Root.Q<Slider>("BackgroundB").value = .14f;
             var dark = RenderedLuminance(camera);
             ui.Root.Q<Slider>("Exposure").value = 1.5f;
             var bright = RenderedLuminance(camera);
@@ -328,7 +543,7 @@ namespace MmdStudio.Poc
             Check("controls_reflect_whole_state_apply", ui.Error.Length == 0 && ui.Root.Q<Toggle>("Bloom").value && ui.Root.Q<Toggle>("Tonemapping").value &&
                 Near(ui.Root.Q<Slider>("Exposure").value, 0) && Near(ui.Root.Q<Slider>("Fov").value, defaults.fieldOfView) &&
                 Near(ui.Root.Q<Slider>("LightIntensity").value, defaults.lightIntensity) && ui.Root.Q<DropdownField>("ShadowQuality").value == "보통 (2048)");
-            Activate(ui.Root, "InspectorTabProperties");
+            if (previousSelection != null) ui.Select(previousSelection);
         }
         private void PickingChecks(MmdSceneWorkspace ui, MmdSceneService.SceneObject a, MmdSceneService.SceneObject b, MmdSceneService.SceneObject stage)
         {
@@ -355,7 +570,7 @@ namespace MmdStudio.Poc
                     var world = stage.Placement.TransformPoint(new Vector3(x, 0, z));
                     var screen = Camera.main.WorldToScreenPoint(world);
                     var candidate = new Vector2(screen.x, screen.y);
-                    if (screen.z > 0 && ui.PointerInViewport(candidate) && !RayTouchesBounds(candidate, characters)) floor = candidate;
+                    if (screen.z > 0 && ui.PointerInViewport(candidate) && !RayTouchesBounds(candidate, characters) && ui.GizmoHandleAt(candidate) < 0) floor = candidate;
                 }
             if (floor == null) throw new InvalidOperationException("No unobstructed stage floor point in the viewport");
             Click(ui, floor.Value);
@@ -368,7 +583,7 @@ namespace MmdStudio.Poc
             Vector2? empty = null;
             foreach (var corner in new[] { new Vector2(rect.xMin + 8, rect.yMax - 8), new Vector2(rect.xMax - 8, rect.yMax - 8), new Vector2(rect.center.x, rect.yMax - 8),
                                            new Vector2(rect.xMin + 8, rect.yMin + 30), new Vector2(rect.xMax - 8, rect.yMin + 30) })
-                if (empty == null && ui.PointerInViewport(corner) && !RayTouchesBounds(corner, ui.Scene.Objects)) empty = corner;
+                if (empty == null && ui.PointerInViewport(corner) && !RayTouchesBounds(corner, ui.Scene.Objects) && ui.GizmoHandleAt(corner) < 0) empty = corner;
             if (empty == null) throw new InvalidOperationException("No empty viewport point");
             Click(ui, empty.Value);
             Check("viewport_click_on_empty_space_clears_selection", ui.SelectedId == null && !ui.HighlightVisible &&

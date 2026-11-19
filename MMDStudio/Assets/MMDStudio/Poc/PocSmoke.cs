@@ -37,10 +37,16 @@ namespace MmdStudio.Poc
             if (path == null)
             {
                 var sceneUiReport = PocArguments.Value("-pocSceneUiReport");
-                if (sceneUiReport != null || Array.IndexOf(Environment.GetCommandLineArgs(), "-sceneUi") >= 0)
+                var restoreReport = PocArguments.Value("-pocSceneRestoreReport");
+                var perfReport = PocArguments.Value("-pocScenePerfReport");
+                var sceneFile = PocArguments.Value("-sceneFile");
+                if (sceneUiReport != null || restoreReport != null || perfReport != null || Array.IndexOf(Environment.GetCommandLineArgs(), "-sceneUi") >= 0)
                 {
                     var sceneUi = gameObject.AddComponent<MmdSceneWorkspace>(); sceneUi.Initialize();
                     if (sceneUiReport != null) yield return gameObject.AddComponent<PocSceneUiProbe>().Run(sceneUi, sceneUiReport);
+                    else if (restoreReport != null) yield return gameObject.AddComponent<PocSceneRestoreProbe>().Run(sceneUi, restoreReport, sceneFile);
+                    else if (perfReport != null) yield return gameObject.AddComponent<PocScenePerformanceProbe>().Run(sceneUi, perfReport);
+                    else if (sceneFile != null) yield return sceneUi.OpenFrom(sceneFile);
                     else if (PocArguments.Value("-pocPmx") != null)
                     {
                         yield return sceneUi.ApplyPickerResult(PocArguments.Value("-pocPmx"), true);

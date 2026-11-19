@@ -1,6 +1,6 @@
 # MMD Studio
 
-작업 인계는 루트 [HANDOFF.md](HANDOFF.md)를 먼저 확인하세요. 현재 브랜치의 미커밋 구현, 실행 방법, 검증 결과와 다음 작업을 정리했습니다.
+작업 인계는 루트 [HANDOFF.md](HANDOFF.md)를 먼저 확인하세요. 현재 브랜치, 실행 방법, 검증 결과와 다음 작업을 정리했습니다. 1차 MVP 기능은 구현·자동 검증되었고 수동 확인과 배포 점검이 남았습니다(docs/KNOWN_ISSUES.md, docs/PERFORMANCE_REPORT.md).
 
 Unity 6000.3.28f1 / URP 17.3.0 Windows x64 desktop application, currently at stage 0 feasibility verification.
 

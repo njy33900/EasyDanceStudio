@@ -7,20 +7,34 @@ namespace MmdStudio.Poc
 {
     public static class WindowsRuntimeFilePicker
     {
-        public static string Open(bool model)
+        public static string Open(bool model) => model
+            ? Show(false, "PMX 모델 (*.pmx)\0*.pmx\0\0", "PMX 모델 선택", "pmx", null)
+            : Show(false, "VMD 모션 (*.vmd)\0*.vmd\0\0", "VMD 모션 선택", "vmd", null);
+        public static string OpenScene() => Show(false, "Easy Dance Studio 장면 (*.mmdscene)\0*.mmdscene\0\0", "장면 열기", "mmdscene", null);
+        // Save dialog with overwrite confirmation; suggestedName may be null.
+        public static string SaveScene(string suggestedName) => Show(true, "Easy Dance Studio 장면 (*.mmdscene)\0*.mmdscene\0\0", "장면 저장", "mmdscene", suggestedName);
+
+        private static string Show(bool save, string filter, string title, string extension, string suggestedName)
         {
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
             var buffer = Marshal.AllocHGlobal(32768 * 2);
             Marshal.WriteInt16(buffer, 0);
+            if (!string.IsNullOrEmpty(suggestedName) && suggestedName.Length < 1024)
+            {
+                var chars = (suggestedName + "\0").ToCharArray();
+                Marshal.Copy(chars, 0, buffer, chars.Length);
+            }
+            // OFN_EXPLORER | NOCHANGEDIR | PATHMUSTEXIST, plus FILEMUSTEXIST (open) or OVERWRITEPROMPT (save).
+            var flags = 0x00080000 | 0x00000800 | 0x00000008 | (save ? 0x00000002 : 0x00001000);
             var data = new OpenFileName
             {
                 owner = GetActiveWindow(),
-                filter = model ? "PMX 모델 (*.pmx)\0*.pmx\0\0" : "VMD 모션 (*.vmd)\0*.vmd\0\0",
+                filter = filter,
                 file = buffer,
                 maxFile = 32768,
-                title = model ? "PMX 모델 선택" : "VMD 모션 선택",
-                defaultExtension = model ? "pmx" : "vmd",
-                flags = 0x00080000 | 0x00001000 | 0x00000800 | 0x00000008
+                title = title,
+                defaultExtension = extension,
+                flags = flags
             };
             var directory = Directory.GetCurrentDirectory();
             try
@@ -28,7 +42,7 @@ namespace MmdStudio.Poc
                 data.size = Marshal.SizeOf(typeof(OpenFileName));
                 if (IntPtr.Size == 8 && data.size != 152)
                     throw new InvalidOperationException("Invalid x64 OPENFILENAME layout.");
-                if (GetOpenFileName(data)) return Path.GetFullPath(Marshal.PtrToStringUni(buffer));
+                if (save ? GetSaveFileName(data) : GetOpenFileName(data)) return Path.GetFullPath(Marshal.PtrToStringUni(buffer));
                 var error = CommDlgExtendedError();
                 if (error != 0) throw new Win32Exception((int)error, "Windows 파일 선택기 오류: 0x" + error.ToString("X"));
                 return null;
@@ -71,6 +85,9 @@ namespace MmdStudio.Poc
         [DllImport("comdlg32.dll", EntryPoint = "GetOpenFileNameW", CharSet = CharSet.Unicode)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool GetOpenFileName([In, Out] OpenFileName data);
+        [DllImport("comdlg32.dll", EntryPoint = "GetSaveFileNameW", CharSet = CharSet.Unicode)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetSaveFileName([In, Out] OpenFileName data);
         [DllImport("comdlg32.dll")]
         private static extern uint CommDlgExtendedError();
         [DllImport("user32.dll")]
