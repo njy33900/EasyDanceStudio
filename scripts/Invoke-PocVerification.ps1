@@ -1,4 +1,5 @@
 param(
+    [ValidateSet('Debug','Release')][string]$Configuration = 'Debug',
     [string]$Unity = 'C:\Program Files\Unity\Hub\Editor\6000.3.28f1\Editor\Unity.exe',
     [switch]$SkipBuild,
     [switch]$IncludePmx,
@@ -20,17 +21,18 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
+$outputRoot = Join-Path (Join-Path $root 'out') $Configuration.ToLowerInvariant()
 $artifacts = Join-Path $root 'artifacts'
-$exe = Join-Path $root 'builds\POC-06C-Mono\MmdStudioPoC.exe'
+$exe = Join-Path $outputRoot 'POC-06C-Mono\MmdStudioPoC.exe'
 if ($Backend -eq 'IL2CPP') {
     $artifacts = Join-Path $root 'artifacts\il2cpp'
-    $exe = Join-Path $root 'builds\POC-06C-IL2CPP\MmdStudioPoC.exe'
+    $exe = Join-Path $outputRoot 'POC-06C-IL2CPP\MmdStudioPoC.exe'
 }
 if ($PhysicsEndurance -and $PhysicsReference) { throw 'Choose PhysicsEndurance or PhysicsReference separately.' }
 if ($PhysicsEndurance -or $PhysicsReference) {
     $kind = if ($PhysicsReference) { 'physics-reference' } else { 'physics-endurance' }
     $artifacts = Join-Path $root "artifacts\$kind\$Backend"
-    $exe = Join-Path $root "builds\POC-06D-$Backend\MmdStudioPoC.exe"
+    $exe = Join-Path $outputRoot "POC-06D-$Backend\MmdStudioPoC.exe"
     $OnlyPhysics = $true
 }
 if ($OnlyComparison) { $IncludeComparison = $true }
@@ -39,6 +41,7 @@ if ($OnlyDeformation) { $IncludeDeformation = $true }
 if ($OnlyPhysics) { $IncludePhysics = $true }
 if ($IncludeComparison) { $IncludeVmd = $true }
 if ($IncludeVmd) { $IncludePmx = $true }
+if ($Configuration -eq 'Release') { $artifacts = Join-Path $artifacts 'release' }
 New-Item -ItemType Directory -Path $artifacts -Force | Out-Null
 
 function Invoke-ProbeProcess([string]$File, [string[]]$Arguments, [int]$TimeoutSeconds) {
@@ -62,7 +65,7 @@ function Invoke-ProbeProcess([string]$File, [string[]]$Arguments, [int]$TimeoutS
 if (-not $SkipBuild) {
     $code = Invoke-ProbeProcess $Unity @(
         '-batchmode', '-nographics', '-quit', '-projectPath', (Join-Path $root 'MMDStudio'),
-        '-executeMethod', 'MmdStudio.Poc.PocBuild.BuildWindows', '-pocOutput', $exe,
+        '-pocConfiguration', $Configuration.ToLowerInvariant(), '-executeMethod', 'MmdStudio.Poc.PocBuild.BuildWindows', '-pocOutput', $exe,
         '-pocBackend', $Backend.ToLowerInvariant(),
         '-logFile', (Join-Path $artifacts 'poc-build.log')
     ) 1800

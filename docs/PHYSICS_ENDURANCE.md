@@ -9,7 +9,7 @@ POC-06D keeps normal interactive playback physics OFF. It adds diagnostics, not 
 .\scripts\Invoke-PocVerification.ps1 -Backend Mono -PhysicsEndurance -SkipBuild
 ```
 
-Both use builds/POC-06D-Mono/MmdStudioPoC.exe. Reference evidence is under artifacts/physics-reference/Mono; endurance evidence is under artifacts/physics-endurance/Mono. Omit -SkipBuild when sources change. Tests use external Gene and the prepared Sandrone_Runtime; no original source assets are changed or bundled. IL2CPP full-duration coverage is not claimed by this ticket.
+Both use out/debug/POC-06D-Mono/MmdStudioPoC.exe. Reference evidence is under artifacts/physics-reference/Mono; endurance evidence is under artifacts/physics-endurance/Mono. Omit -SkipBuild when sources change. Tests use external Gene and the prepared Sandrone_Runtime; no original source assets are changed or bundled. IL2CPP full-duration coverage is not claimed by this ticket.
 
 ## What the endurance result means
 

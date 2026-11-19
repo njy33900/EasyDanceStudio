@@ -24,7 +24,7 @@ namespace MmdStudio.Poc
     // Controlled stage-0 probe, not yet the production importer or file picker.
     public static class MmdPocProbe
     {
-        public static MmdPocSummary Load(string path, Camera camera, out PMXImportResult imported)
+        public static MmdPocSummary Load(string path, Camera camera, out PMXImportResult imported, bool frameCamera = true)
         {
             imported = null;
             path = Path.GetFullPath(path);
@@ -90,13 +90,16 @@ namespace MmdStudio.Poc
                     summary.blendShapes += renderer.sharedMesh.blendShapeCount;
                     renderer.updateWhenOffscreen = true;
                 }
-                var radius = Mathf.Max(bounds.extents.magnitude, 0.5f);
-                camera.transform.position = bounds.center + Vector3.forward * radius * 2.5f;
-                camera.transform.LookAt(bounds.center);
-                camera.nearClipPlane = 0.01f;
-                camera.farClipPlane = Mathf.Max(100, radius * 10);
-                var cube = GameObject.Find("Cube");
-                if (cube != null) cube.SetActive(false);
+                if (frameCamera)
+                {
+                    var radius = Mathf.Max(bounds.extents.magnitude, 0.5f);
+                    camera.transform.position = bounds.center + Vector3.forward * radius * 2.5f;
+                    camera.transform.LookAt(bounds.center);
+                    camera.nearClipPlane = 0.01f;
+                    camera.farClipPlane = Mathf.Max(100, radius * 10);
+                    var cube = GameObject.Find("Cube");
+                    if (cube != null) cube.SetActive(false);
+                }
                 return summary;
             }
             catch

@@ -8,8 +8,8 @@ PocBuild accepts -pocBackend mono or il2cpp. The build temporarily selects the r
 
 | Backend | Player directory | Evidence directory |
 | --- | --- | --- |
-| Mono | builds/POC-06C-Mono | artifacts |
-| IL2CPP | builds/POC-06C-IL2CPP | artifacts/il2cpp |
+| Mono | out/debug/POC-06C-Mono | artifacts |
+| IL2CPP | out/debug/POC-06C-IL2CPP | artifacts/il2cpp |
 
 The POC-06B binaries remain intact. Start-MmdPoc.ps1 and Start-SandronePoc.ps1 accept -Backend Mono or IL2CPP. Normal interactive playback remains physics OFF for either backend.
 
@@ -28,7 +28,7 @@ This establishes a reproducible controlled reset/preroll strategy, not instant r
 ## Local native inventory
 
 ```powershell
-python scripts/inspect_player_native.py --player builds/POC-06C-IL2CPP --report artifacts/il2cpp/native-inventory.json
+python scripts/inspect_player_native.py --player out/debug/POC-06C-IL2CPP --report artifacts/il2cpp/native-inventory.json
 ```
 
 This read-only PE parser checks x64 executable/DLL architecture, hashes, required Bullet create/destroy/step exports and presence of the copied notices. It never loads a DLL. Runtime PMX import builds the native rigid-body context; the physics probe additionally steps it and retires it.

@@ -108,10 +108,27 @@ namespace MmdStudio.Poc
         public float TimeSeconds { get; private set; }
         internal int ClipRevision { get; private set; }
         private object physicsOwner;
+        private object sceneOwner;
+        private bool sceneSampling;
+        internal void AcquireSceneClock(object owner)
+        {
+            if (physicsOwner != null || sceneOwner != null) throw new InvalidOperationException("Motion already has a pose owner");
+            sceneOwner = owner;
+            Playing = false;
+        }
+        internal void ReleaseSceneClock(object owner) { if (ReferenceEquals(sceneOwner, owner)) sceneOwner = null; }
+        internal bool OwnsSceneClock(object owner) => ReferenceEquals(sceneOwner, owner);
+        internal void SampleFromSceneClock(object owner, float seconds)
+        {
+            if (!OwnsSceneClock(owner) || Playing) throw new InvalidOperationException("Scene clock ownership mismatch");
+            sceneSampling = true;
+            try { Sample(seconds); }
+            finally { sceneSampling = false; }
+        }
         private bool statefulSample;
         internal void AcquirePhysics(object owner)
         {
-            if (physicsOwner != null) throw new InvalidOperationException("Another physics session already owns this motion");
+            if (physicsOwner != null || sceneOwner != null) throw new InvalidOperationException("Another session already owns this motion");
             physicsOwner = owner;
         }
         internal bool OwnsPhysics(object owner) => ReferenceEquals(physicsOwner, owner);
@@ -119,8 +136,10 @@ namespace MmdStudio.Poc
 
         public void Load(PMXImportResult imported, string path, string mode = "sparse")
         {
+            if (sceneOwner != null) throw new InvalidOperationException("Use the scene service to replace this motion");
             ClipRevision++;
             physicsOwner = null;
+            sceneOwner = null;
             if (mode != "sparse" && mode != "sparse-default-ik" && mode != "baked-reference" &&
                 mode != "direct" && mode != "direct-default-ik")
                 throw new ArgumentException("Unknown -pocMotionMode: " + mode);
@@ -329,6 +348,7 @@ namespace MmdStudio.Poc
 
         private void Update()
         {
+            if (sceneOwner != null) return;
             if (skipNextAdvance) { skipNextAdvance = false; return; }
             if (Playing && clip != null) Advance(Time.unscaledDeltaTime);
         }
@@ -391,6 +411,8 @@ namespace MmdStudio.Poc
 
         private void SampleInternal(float seconds, float? physicsDelta)
         {
+            if (sceneOwner != null && !sceneSampling)
+                throw new InvalidOperationException("The scene clock owns this pose");
             if (physicsOwner != null && !statefulSample)
                 throw new InvalidOperationException("A physics session owns this pose; use its seek/advance methods");
             TimeSeconds = Mathf.Clamp(seconds, 0, Summary.durationSeconds);

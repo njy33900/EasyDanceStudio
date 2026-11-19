@@ -1,5 +1,12 @@
 # Decisions
 
+## ADR-014 — Bound physics validation and proceed toward the MVP
+
+- v0.1.0-poc is the preserved source baseline. Follow-up work starts on codex/physics-validation, preserving the normal physics-OFF preview.
+- Add non-collinear feature-enabled/disabled controls to prove append/IK excitation, and run the typed stateful service on the real supplied motion. Numerical replay remains distinct from independent physical accuracy or continuous visual signoff.
+- Once these bounded checks finish, the next product ticket is MVP-01 multi-character scene/shared clock, physics OFF. Do not keep delaying scene work for unrestricted physics research. Physics UI integration has separate seek/retirement/error/visual gates.
+- The complete P0 MVP scope and first scene-service acceptance criteria are fixed in MVP_SCOPE.md; later UI, background, graphics and save/restore requirements are retained.
+
 ## ADR-001 — Engine and first verification target (2026-11-18)
 
 - Unity: 6000.3.28f1, revision 8f082d2fe476, installed locally.
