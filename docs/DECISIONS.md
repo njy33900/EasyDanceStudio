@@ -1,5 +1,15 @@
 # Decisions
 
+## ADR-017 — Competitive-edge plan, physics ON, embedded UMT (2026-11-20)
+
+Confirmed by the user ("다 넣어서 진행해") for `docs/ENHANCEMENT_SPEC_v0.5.md` section 8.2, based on `docs/RESEARCH_COMPETITIVE_EDGE.md`.
+
+- **Target users:** first, beginner-to-intermediate users who already have MMD assets, and short-form video makers; advanced MMD users second.
+- **Physics (amends ADR-014):** normal playback gets optional physics ON (PH bundle). Every rigid body and joint defined in the PMX is simulated to the MMD standard, including body secondary-motion parts such as chest and hips — none are excluded or weakened; adjustment is a per-part user setting with a 1.0× default. Output uses the physics bake cache. Physics stays OFF in the UI until the PH gates pass; the default ON/OFF is chosen after the PH-00 measurement.
+- **Order:** H1 → PH → H2a → H2b → H3 → D. Release timing is not set; the R0 gates still apply when it is.
+- **Analysis (D bundle):** local signal processing only; no network/cloud/external AI services and no ML models without a separate ADR. (Whether `AGENTS.md`'s local-model rule also covers product features is still to be confirmed; this choice satisfies both readings.)
+- **UMT embedded:** UnityMMDTools is moved from the pinned Git dependency into `MMDStudio/Packages/com.candidumgames.unitymmdtools` (base commit `db35d9cb80ad57a8b2cbd40ad737a3c7bbe2d6c4`, MIT). Local changes are listed in the package's `PATCHES.md`; upstream updates are merged by hand. First patch: `try/finally` release of native contexts in VMD conversion. The repository grows by about 58 MB (Kawazu dictionary `sys.bytes` is 47 MB).
+
 ## ADR-016 — Enhancement plan decisions (2026-11-19)
 
 Confirmed by the user for `docs/ENHANCEMENT_SPEC_v0.4.md` section 8.

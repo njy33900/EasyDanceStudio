@@ -42,6 +42,8 @@ namespace MmdStudio.Poc
             }
             if (path == null)
             {
+                var physicsMeasureReport = PocArguments.Value("-pocPhysicsMeasureReport");
+                if (physicsMeasureReport != null) { yield return gameObject.AddComponent<PocPhysicsMeasureProbe>().Run(physicsMeasureReport); yield break; }
                 var stagingReport = PocArguments.Value("-pocPmxStagingReport");
                 if (stagingReport != null)
                 {

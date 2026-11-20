@@ -3,6 +3,9 @@
 ## H1-01 — 단일 PMX/VMD 단계별 로딩 (부분 구현, 2026-11-19)
 
 - UI의 PMX 추가와 VMD 연결/교체를 파일 I/O, UMT 메인 스레드 프레임 분할, 후보 반영 단계로 나눴다. 단계명·취소 요청 카드를 표시하며 안전한 경계에서 취소한다. Release IL2CPP Windows Player UI **124/124**, 재실행 **9/9** 통과; 추가 PMX·대용량 VMD 취소 뒤 기존 장면/모션 보존을 검사했다. `H1_LOADING_STAGE1.md`.
+- **PH-00 측정 (2026-11-20, Release IL2CPP):** `PocPhysicsMeasureProbe`/`run-physics-measure.sh`. 한 틱 Gene 0.64 ms, Sandrone(강체 571) 11.1 ms(p99 24 ms). 시킹 30초: Gene 1.1초, Sandrone 20초 → 굽기 캐시를 재생 기본 경로로(명세 PH-03 갱신). Sandrone 가슴 등 전 부위 안정, Gene 망토 추 강체 불안정(558/1199틱 튐). 캐릭터 간 충돌 없음(모델별 물리 세계). 수명 누수 없음. `PH00_PHYSICS_INTEGRATION.md`.
+- **UMT 내장·VMD Native 패치 (2026-11-20, ADR-017):** UMT를 `MMDStudio/Packages/com.candidumgames.unitymmdtools`로 내장, 변경은 `PATCHES.md`. 패치 #1: VMD 변환 Native 컨텍스트·버퍼 `finally` 해제. Release IL2CPP: 실패 1회당 누수 원본 16.7 MB → 407 B, UI 126/126·복원 9/9·비교 3모델 동일. 다음: PH-00 측정(`PH00_PHYSICS_INTEGRATION.md`).
+- **명세 0.5 (2026-11-20, ADR-017 확정):** `ENHANCEMENT_SPEC_v0.5.md` — 경쟁 조사(`RESEARCH_COMPETITIVE_EDGE.md`) 반영. 물리 PH 묶음(전 강체·신체 2차 움직임 포함, 부위별 강도, 굽기 캐시), 룩 프리셋 H2a-05, 숏폼·투명 출력 H3-04, 차별화 D(자동 카메라·립싱크·모션 맞춤·VRM 조사). 결정 13~17(ADR-017 후보) 미정.
 - **H1-01 반복 취소·재시도 (2026-11-20):** `PocSceneCycleProbe`/`run-scene-cycle.sh`. Release IL2CPP 20회(단계별 취소 → 재열기): 객체 수 매 회 동일, Unity 할당 +1.9 MiB(10회 이후 평탄), 예약 메모리는 할당기 풀로 542→598 MiB.
 - **H1-01 VMD Native 예외 경로 (2026-11-20):** UMT VMD 변환은 Native 컨텍스트를 성공 경로에서만 해제한다. 우리 진행 콜백이 예외를 UMT로 던지지 않게 모두 감쌌다(항상 던지는 콜백으로도 VMD 로드 성공, Release IL2CPP). UMT 내부 예외 대비 `try/finally`는 패키지 내장 결정 필요.
 - **H1-01 후반 실패 정리 (2026-11-20):** UMT 빌드가 중간에 실패하면 컨테이너에 붙은 메시·재질·아바타를 정리한다. Release IL2CPP에서 세 단계 실패 주입 시 남은 객체 0(`run-pmx-staging.sh`의 `lateFailures`).

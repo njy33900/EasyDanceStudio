@@ -110,3 +110,20 @@ Release IL2CPP: 비교 프로브 3모델 동일 유지, UI 126/126·복원 9/9. 
 - 객체 수 20회 모두 동일(Mesh 37, Material 127, Texture2D 154, GameObject 2593, ScriptableObject 120, 소유자 3, 후보 0). 취소 20/20 기존 장면 유지, 재열기 20/20 성공(각 약 1.97~2.01초).
 - Unity 할당 메모리 402.7 → 404.6 MiB(+1.9 MiB, 10회 이후 변화 없음). Mono 사용량 78~81 MiB 범위(재질 단계 취소 직후 회차만 일시적으로 약 97 MiB, 다음 회 복귀). Unity 예약 메모리는 542 → 598 MiB로 계단식 증가 — 할당기 풀이 반환하지 않고 재사용하는 양으로 보이며 할당량은 늘지 않았다. 더 긴 반복에서 계속 오르는지는 미확인.
 - 처음 설계에서 Gene의 `재질` 단계는 13개 재질이 한 프레임 안에 끝나 취소 지점으로 잡을 수 없어 Sandrone에서만 겨냥한다. VMD 취소는 `VMD 파일 읽는 중`에서 잡혔고 곡선 변환 도중 취소는 이 실행에서 겨냥되지 않았다(변환은 취소 검사가 변환 뒤에 있음).
+
+## UMT 내장과 VMD 변환 Native 해제 패치 (2026-11-20, Claude · Release IL2CPP 검증)
+
+ADR-017에 따라 UMT를 `MMDStudio/Packages/com.candidumgames.unitymmdtools`로 내장했다(기준 커밋 `db35d9cb`, `manifest.json`의 Git 의존성 제거, `packages-lock.json`은 `embedded`). 변경 목록은 패키지의 `PATCHES.md`.
+
+**패치 #1:** `VMDAnimationClipConverter.Convert/ConvertAsync`의 솔버·물리 컨텍스트와 `IndexResolver`, `AddBoneCurves`·`AddIKCurves`·`AddMorphCurves`의 Native 버퍼를 `finally`에서 해제한다. 성공 경로 동작은 그대로다(UI 126/126, 복원 9/9, 비교 3모델 동일). 굽기 경로(`bakeIKToFK`, 진단용 `baked-reference`)와 카메라 변환은 아직 미적용.
+
+**검증 (Release IL2CPP, Gene + Whiplash 전체):** UMT 내부에서 예외가 나는 변환을 반복하고 Unity 할당 메모리의 안정 상태 증가를 성공 변환과 비교했다.
+
+| 빌드 | 실패 1회당 누수 | 성공 1회당 |
+|---|---|---|
+| 원본 UMT(음성 대조군) | **16.7 MB** | 13 KB |
+| 패치 #1 | **407 B** | -133 B |
+
+경과: 처음에는 3초짜리 테스트 VMD로 측정했는데 음성 대조군에서도 증가가 0이었다(버퍼가 몇 KB라 노이즈에 묻힘). 그래서 전체 길이 VMD로 바꿨다. 한 번의 동기 변환에 약 1초가 걸리므로 회차당 3회로 줄였고, 변환 사이에 프레임을 양보한다. Whiplash로 회차당 20회를 돌린 첫 시도는 창이 몇 분간 응답 없음 상태가 되어 강제 종료했다.
+
+이 패치로 앞 절의 "VMD Native 예외 경로 — UMT 내부 예외는 남은 한계"가 해소되었다(진행 콜백 보호 `ReportSafely`는 유지).

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- PH-00 physics measurements (`scripts/bash/run-physics-measure.sh`): a 571-rigid-body model costs 11 ms per 60 Hz tick and 20 s to seek to 30 s, so the physics bake cache becomes the default playback path; chest and other secondary-motion bodies are stable, one model's cloak weight bodies are unstable, characters do not collide with each other.
+- UnityMMDTools is now an embedded package (`MMDStudio/Packages/com.candidumgames.unitymmdtools`, base commit `db35d9cb`, local changes in `PATCHES.md`). Patch #1 releases VMD conversion native contexts and buffers when conversion throws: a failing conversion leaked 16.7 MB before and 407 bytes after (Release IL2CPP).
+- Enhancement spec 0.5 (ADR-017): optional physics covering every PMX rigid body including body secondary motion, look presets, short-form/transparent output, and differentiation features (beat-based auto camera, lip sync, motion fitting).
 - Added a repeated cancel/retry scene-open probe (`scripts/bash/run-scene-cycle.sh`): 20 Release IL2CPP cycles keep object counts identical and Unity allocated memory within +1.9 MiB.
 - Loading progress callbacks can no longer abort PMX/VMD loading: an exception thrown from one is logged as a warning, so it cannot interrupt UMT's VMD conversion before it frees its native solver contexts.
 - When UMT fails part way through building a model, the meshes, materials and avatar it already created are now destroyed instead of leaking; a fault-injection check in the PMX staging probe verifies nothing is left after failures in three late stages.

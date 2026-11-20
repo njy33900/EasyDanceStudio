@@ -42,6 +42,13 @@ namespace MmdStudio.Poc
             public bool throwingProgressVmdLoaded;
             public int throwingProgressCalls;
             public string throwingProgressError;
+            // UMT patch #1: VMD conversion that throws part way (from inside UMT) must release its
+            // native solver contexts and buffers. Unity allocated memory is compared over repeats.
+            public int conversionFailuresThrown, conversionFailures;
+            public long conversionLeakBytesPerFailure, conversionBaselineBytesPerSuccess;
+            // Per-round growth (bytes/conversion): success, success, failure, success, failure, success.
+            public long[] conversionRounds;
+            public string conversionFailureError;
         }
         [Serializable] private sealed class LateFailure
         {
@@ -157,13 +164,59 @@ namespace MmdStudio.Poc
                     while (!motionTask.IsCompleted) yield return null;
                     report.throwingProgressVmdLoaded = motionTask.Status == System.Threading.Tasks.TaskStatus.RanToCompletion && motion.Summary != null && motion.Summary.mappedBoneTracks > 0;
                     if (motionTask.IsFaulted) report.throwingProgressError = motionTask.Exception.GetBaseException().ToString();
+                    // Unity "allocated" also grows with heap/allocator warm-up, so success and failure
+                    // rounds alternate and the steady-state growth of each kind is compared. One
+                    // conversion per frame keeps the window responsive.
+                    VMDAnimation animation = null;
+                    // The full-length VMD is needed: with a short fixture the leaked native buffers are
+                    // only KBs and disappear in allocator noise (negative control 2026-11-20). Each
+                    // synchronous conversion takes about a second, so the repeat count is small.
+                    try { animation = VMDReader.Read(File.ReadAllBytes(vmd)); }
+                    catch (Exception ex) { report.conversionFailureError = ex.ToString(); }
+                    if (animation != null)
+                    {
+                        var options = new VMDAnimationClipOptions { frameRate = 30 };
+                        long Allocated() { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); return UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong(); }
+                        // Throw after the morph buffers exist (second morph report), so both the
+                        // top-level contexts and the inner try/finally blocks are exercised.
+                        VMDAnimationClipConverter.ProgressCallback failing = (stage, frame, total) =>
+                        { if (stage == VMDAnimationClipConverter.Stage.MorphConversion && frame > 0) throw new InvalidOperationException("injected conversion failure"); };
+                        const int Repeats = 3;
+                        var rounds = new List<long>();
+                        foreach (var fail in new[] { false, false, true, false, true, false })
+                        {
+                            var start = Allocated();
+                            for (var i = 0; i < Repeats && report.conversionFailureError == null; i++)
+                            {
+                                try
+                                {
+                                    if (!fail) VMDAnimationClipConverter.Convert(animation, model.model, options);
+                                    else
+                                    {
+                                        report.conversionFailures++;
+                                        try { VMDAnimationClipConverter.Convert(animation, model.model, options, failing); }
+                                        catch (InvalidOperationException ex) when (ex.Message.Contains("injected")) { report.conversionFailuresThrown++; }
+                                    }
+                                }
+                                catch (Exception ex) { report.conversionFailureError = ex.ToString(); }
+                                yield return null;
+                            }
+                            rounds.Add((Allocated() - start) / Repeats);
+                        }
+                        report.conversionRounds = rounds.ToArray();
+                        report.conversionBaselineBytesPerSuccess = Math.Max(rounds[3], rounds[5]);
+                        report.conversionLeakBytesPerFailure = Math.Max(rounds[2], rounds[4]) - report.conversionBaselineBytesPerSuccess;
+                        Destroy(animation);
+                    }
                     Release(model);
                 }
             }
             var error = !results.All(model => model.identical) ? "Staged import differs from the reference import."
                 : !failures.All(f => f.threw && f.clean) ? "Late UMT failure left objects behind or did not throw."
                 : !string.IsNullOrEmpty(PocArguments.Value("-pocVmd")) && !(report.throwingProgressVmdLoaded && report.throwingProgressCalls > 0)
-                    ? "VMD load with a throwing progress callback failed: " + report.throwingProgressError : null;
+                    ? "VMD load with a throwing progress callback failed: " + report.throwingProgressError
+                : !string.IsNullOrEmpty(PocArguments.Value("-pocVmd")) && (report.conversionFailuresThrown != report.conversionFailures || report.conversionFailures == 0 || report.conversionLeakBytesPerFailure > 64 * 1024)
+                    ? "UMT VMD conversion failure leaked or did not throw: " + report.conversionLeakBytesPerFailure + " bytes/failure " + report.conversionFailureError : null;
             Finish(reportPath, report, results, error);
         }
 

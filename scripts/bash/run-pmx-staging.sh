@@ -27,5 +27,6 @@ for m in r['models'] or []:
   for t in m.get('slowestFrames') or []: print('     slow', t)
   for x in (m['mismatches'] or [])[:5]: print('   MISMATCH', x[:600].encode('ascii','replace').decode())
 print('VMD with throwing progress callback: loaded=%s calls=%d %s' % (r.get('throwingProgressVmdLoaded'), r.get('throwingProgressCalls',0), (r.get('throwingProgressError') or '')[:300]))
+print('UMT conversion failure: thrown %d/%d, leak %d bytes/failure (success baseline %d) %s' % (r.get('conversionFailuresThrown',0), r.get('conversionFailures',0), r.get('conversionLeakBytesPerFailure',0), r.get('conversionBaselineBytesPerSuccess',0), (r.get('conversionFailureError') or '')[:300]), 'rounds', r.get('conversionRounds'))
 for f in r.get('lateFailures') or []: print('late failure after %-28s threw=%s clean=%s | %s' % (f['stage'], f['threw'], f['clean'], f['leaked']))
 " "$A/pmx-staging.json" "$START"

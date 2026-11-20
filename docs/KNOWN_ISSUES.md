@@ -41,3 +41,8 @@
 
 - PowerShell 7 was not installed in the Claude session, so verification used an equivalent bash runner; the `.ps1` scripts were parse-checked with Windows PowerShell, not executed.
 - The legacy native inventory/notice check and the older POC regression suites were not rerun after MVP-03.
+
+## UMT embedded (2026-11-20)
+
+- UnityMMDTools is embedded and patched (ADR-017). Upstream updates must be merged by hand using `PATCHES.md`. The repository grows by about 58 MB (Kawazu dictionary `sys.bytes` is 47 MB).
+- VMD conversion still leaks native buffers on exceptions in the baked path (`bakeIKToFK`, diagnostic only) and in camera conversion; the normal sparse path is patched.
