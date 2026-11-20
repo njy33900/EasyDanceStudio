@@ -71,6 +71,12 @@ namespace MmdStudio.Poc
                 if (i % 2 == 0) yield return null;
             }
             ui.SetFocusView(true);
+            if (springMode)
+            {
+                yield return SpringCloseUps(ui, ids[1], directory, shots, differences);
+                Finish(reportPath, report, shots, differences, null);
+                yield break;
+            }
             for (var c = springMode ? 1 : 0; c < plan.Length; c++)
             {
                 var item = ui.Scene.Objects.First(o => o.Id == ids[c]);
@@ -92,6 +98,56 @@ namespace MmdStudio.Poc
                 }
             }
             Finish(reportPath, report, shots, differences, null);
+        }
+
+        // PH-05 close-ups: camera in front of the chest (from the spine-to-chest direction), at the
+        // moment of the largest spring swing in the first 60 s and at 16.4 s; spring OFF, medium,
+        // strong at the same camera.
+        private static IEnumerator SpringCloseUps(MmdSceneWorkspace ui, string id, string directory, List<string> shots, List<float> differences)
+        {
+            var item = ui.Scene.Objects.First(o => o.Id == id);
+            var roots = item.SpringCandidates.Where(c => c.Weighted).Select(c => item.Model.bones[c.Bone]).ToArray();
+            var times = new List<float>();
+            foreach (var preset in new[] { "medium", "strong" })
+            {
+                ui.Scene.SetSpring(id, preset);
+                for (var i = 0; i < 20000 && !item.SpringReady; i++) { ui.Scene.BakePhysicsSlice(); if (i % 2 == 0) yield return null; }
+                if (times.Count == 0)
+                {
+                    // Largest swing of the chest roots (spring vs OFF local rotation) in the first 60 s.
+                    var best = 0f; var bestTime = 16.4f;
+                    for (var t = 1f; t < Mathf.Min(60, item.Motion.Summary.durationSeconds); t += 1f / 15)
+                    {
+                        item.Motion.SampleFromSceneClock(ui.Scene, t);
+                        var off = roots.Select(r => r.localRotation).ToArray();
+                        item.SpringBake.Apply(t);
+                        var swing = roots.Select((r, k) => Quaternion.Angle(off[k], r.localRotation)).Sum();
+                        if (swing > best) { best = swing; bestTime = t; }
+                    }
+                    times.Add(bestTime); times.Add(16.4f);
+                    Debug.Log("[spring-closeup] largest swing " + best.ToString("0.0") + " deg at " + bestTime.ToString("0.00") + " s");
+                }
+                foreach (var time in times)
+                {
+                    ui.Scene.Seek(time);
+                    var mid = roots.Aggregate(Vector3.zero, (a, r) => a + r.position) / roots.Length;
+                    var spine = roots[0].parent != null ? roots[0].parent.position : item.Placement.position;
+                    var front = mid - spine; front.y = 0;
+                    if (front.sqrMagnitude < 1e-6f) front = Vector3.forward;
+                    front.Normalize();
+                    var yaw = Mathf.Atan2(-front.x, -front.z) * Mathf.Rad2Deg;
+                    ui.View.Set(mid, yaw, 5, .55f); ui.View.Apply(Camera.main);
+                    yield return null;
+                    var stamp = time.ToString("0.00") + "s";
+                    var on = item.Model.bones.Select(b => b.position).ToArray();
+                    yield return Capture(Path.Combine(directory, "spring_closeup_" + stamp + "_" + preset + ".png"), shots);
+                    item.Motion.SampleFromSceneClock(ui.Scene, time);
+                    var offPose = item.Model.bones.Select(b => b.position).ToArray();
+                    differences.Add(on.Zip(offPose, (x, y) => Vector3.Distance(x, y)).Max());
+                    if (preset == "medium") yield return Capture(Path.Combine(directory, "spring_closeup_" + stamp + "_off.png"), shots);
+                    ui.Scene.Seek(time);
+                }
+            }
         }
 
         private static IEnumerator Capture(string path, List<string> shots)
