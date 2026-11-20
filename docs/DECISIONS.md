@@ -1,5 +1,13 @@
 # Decisions
 
+## ADR-018 — Body secondary motion via spring bones (2026-11-20)
+
+Confirmed by the user ("A로 하고") after `docs/RESEARCH_SECONDARY_MOTION.md`.
+
+- Chest/hip secondary motion for models that have the bones but no rigid bodies is added with a project-owned **spring-bone** layer (damped spring / verlet on bone tails), the industry-standard approach (Koikatsu DynamicBone, VRM SpringBone, Blender Wiggle, Unreal Kawaii Physics), not by injecting Bullet rigid bodies (option B, kept as a fallback) and not by generating bones/weights (option C, research only).
+- Baked ahead like the physics cache (60 Hz ticks, deterministic), presets light/medium/strong, works with the per-part strength sliders, saved per character in the scene; the original PMX is never modified; a model-terms notice is shown and the feature is off by default.
+- Bones that already have non-kinetic rigid bodies keep the Bullet physics and get no spring.
+
 ## ADR-017 — Competitive-edge plan, physics ON, embedded UMT (2026-11-20)
 
 Confirmed by the user ("다 넣어서 진행해") for `docs/ENHANCEMENT_SPEC_v0.5.md` section 8.2, based on `docs/RESEARCH_COMPETITIVE_EDGE.md`.

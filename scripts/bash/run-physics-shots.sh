@@ -3,12 +3,14 @@
 # usage: scripts/bash/run-physics-shots.sh <debug|release> <Mono|IL2CPP>   (build first with run-scene-ui.sh)
 set -u
 cd /e/workspace/EasyDanceStudio
-CFG=$1; BK=$2
+CFG=$1; BK=$2; MODE=${3:-}   # third argument "spring": PH-05 spring shots
 R='E:\workspace\EasyDanceStudio'
 A="artifacts/physics-shots/$BK-$CFG"; mkdir -p "$A"; AW="$R\\${A//\//\\}"
 EXEU="./out/$CFG/V0-$BK/MmdStudioPoC.exe"
 START=$(date +%s)
-timeout 900 "$EXEU" -pocPhysicsShots "$AW" \
+EXTRA=()
+[ "$MODE" = "spring" ] && EXTRA=(-pocSpringShots)
+timeout 900 "$EXEU" -pocPhysicsShots "$AW" "${EXTRA[@]}" \
   -pocPmx "$R\\test\\models\\Gene\\Gene_light.pmx" -pocSecondPmx "$R\\test\\Sandrone_Runtime\\桑多涅_目齿轮可动.pmx" \
   -pocVmd "$R\\test\\aespa - Whiplash\\aespa - Whiplash\\Whiplash [SMOOTH].vmd" -logFile "$AW\\physics-shots.log" \
   -screen-fullscreen 0 -screen-width 1280 -screen-height 720 > "$A/stdout.txt" 2>&1

@@ -155,6 +155,7 @@ namespace MmdStudio.Poc
                     visible = item.Visible, physics = item.PhysicsEnabled,
                     physicsParts = item.PhysicsStrength.Count == 0 ? null : item.PhysicsStrength.Keys.ToArray(),
                     physicsStrength = item.PhysicsStrength.Count == 0 ? null : item.PhysicsStrength.Values.ToArray(),
+                    springPreset = item.SpringPreset,
                 };
             }
             SceneObjectData Missing(UnresolvedItem item)
@@ -295,6 +296,8 @@ namespace MmdStudio.Poc
                                 if (Array.IndexOf(MmdPhysicsParts.Order, data.physicsParts[p]) >= 0)
                                     Scene.SetPhysicsStrength(live.Id, data.physicsParts[p], Mathf.Clamp01(data.physicsStrength[p]));
                         if (data.physics && live.Motion != null) Scene.SetPhysics(live.Id, true);
+                        if (!string.IsNullOrEmpty(data.springPreset) && Array.IndexOf(MmdSpringBones.PresetIds, data.springPreset) >= 0 &&
+                            live.Motion != null && live.SpringAvailable) Scene.SetSpring(live.Id, data.springPreset);
                     }
                     Graphics.Apply(file.graphics);
                     View.Set(file.view.pivot, file.view.yaw, file.view.pitch, file.view.distance); View.Apply(Camera.main);

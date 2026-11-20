@@ -41,6 +41,8 @@ namespace MmdStudio.Poc
         // PH-04 (optional): per-part physics strength (0..1), parallel arrays.
         public string[] physicsParts;
         public float[] physicsStrength;
+        // PH-05 (optional): chest/hip spring preset ("light"/"medium"/"strong"), null when off.
+        public string springPreset;
     }
 
     [Serializable]

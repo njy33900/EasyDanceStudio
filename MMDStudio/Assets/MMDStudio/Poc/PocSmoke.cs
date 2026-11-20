@@ -42,6 +42,8 @@ namespace MmdStudio.Poc
             }
             if (path == null)
             {
+                var springReport = PocArguments.Value("-pocSpringReport");
+                if (springReport != null) { yield return gameObject.AddComponent<PocSpringProbe>().Run(springReport); yield break; }
                 var physicsBakeReport = PocArguments.Value("-pocPhysicsBakeReport");
                 if (physicsBakeReport != null) { yield return gameObject.AddComponent<PocPhysicsBakeProbe>().Run(physicsBakeReport); yield break; }
                 var physicsMeasureReport = PocArguments.Value("-pocPhysicsMeasureReport");

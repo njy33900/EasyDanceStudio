@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using UMT;
@@ -42,6 +43,22 @@ namespace MmdStudio.Poc
             internal readonly Dictionary<string, float> PhysicsStrength = new Dictionary<string, float>();
             public string[] PhysicsParts => Bake == null ? new string[0] : Bake.Parts;
             public float StrengthOf(string part) => PhysicsStrength.TryGetValue(part, out var value) ? value : 1;
+            // PH-05: chest/hip spring bones (null: off). Candidates are detected once per model.
+            public string SpringPreset { get; internal set; }
+            internal MmdSpringBake SpringBake { get; set; }
+            internal bool SpringStale { get; set; }
+            private List<MmdSpringCandidate> springCandidates;
+            internal List<MmdSpringCandidate> SpringCandidates => springCandidates ?? (springCandidates = MmdSpringBones.Detect(Model));
+            // Probe hook: let roots that already have rigid bodies take a spring (test models only).
+            internal bool SpringForceForTest { get; set; }
+            public bool SpringAvailable => Kind == ObjectKind.Character && SpringCandidates.Any(c => c.Usable || (SpringForceForTest && c.Weighted));
+            public string SpringSummary => MmdSpringBones.Describe(SpringCandidates);
+            public bool SpringReady => SpringBake != null && !SpringStale && SpringBake.Complete;
+            public float SpringProgress => SpringBake == null || SpringStale ? 0 : SpringBake.Progress;
+            // Parts with a strength slider: physics parts plus spring parts.
+            public string[] MotionParts => (Bake == null ? new string[0] : Bake.Parts)
+                .Union(SpringBake == null ? new string[0] : SpringBake.Parts)
+                .OrderBy(p => Array.IndexOf(MmdPhysicsParts.Order, p)).ToArray();
         }
         private readonly List<SceneObject> objects = new List<SceneObject>();
         // Per-frame physics bake budget (ms). One character is baked per frame, round-robin.
@@ -282,6 +299,7 @@ namespace MmdStudio.Poc
             item.Motion = candidate;
             item.MotionSource = Path.GetFullPath(path);
             if (item.PhysicsEnabled) RebuildBake(item);
+            if (item.SpringPreset != null) RebuildSpring(item);
             Seek(Seconds);
         }
 
@@ -316,6 +334,7 @@ namespace MmdStudio.Poc
             item.Motion = candidate;
             item.MotionSource = Path.GetFullPath(path);
             if (item.PhysicsEnabled) RebuildBake(item);
+            if (item.SpringPreset != null) RebuildSpring(item);
             Seek(Seconds);
         }
 
@@ -323,7 +342,7 @@ namespace MmdStudio.Poc
         {
             var item = Find(id);
             objects.Remove(item);
-            item.Bake = null;
+            item.Bake = null; item.SpringBake = null;
             if (item.Motion != null) item.Motion.ReleaseSceneClock(this);
             item.Owner.Release();
             if (objects.Count == 0) { Playing = false; Seconds = 0; }
@@ -346,6 +365,7 @@ namespace MmdStudio.Poc
             if (item.Motion == null) return;
             item.Motion.SampleFromSceneClock(this, (float)time);
             if (item.Bake != null && !item.BakeStale) item.Bake.Apply((float)time);
+            if (item.SpringBake != null && !item.SpringStale) item.SpringBake.Apply((float)time);
         }
 
         // Turns experimental physics on/off for a character. Turning it on starts a fresh bake from
@@ -373,6 +393,39 @@ namespace MmdStudio.Poc
             catch (Exception ex) { item.PhysicsEnabled = false; item.PhysicsError = ex.Message; Debug.LogWarning("Physics disabled: " + ex.Message); }
         }
 
+        // PH-05: chest/hip spring bones for a character (preset id, or null to turn off).
+        public void SetSpring(string id, string preset)
+        {
+            var item = Find(id);
+            if (preset != null && Array.IndexOf(MmdSpringBones.PresetIds, preset) < 0) throw new ArgumentOutOfRangeException(nameof(preset));
+            if (preset != null && (item.Motion == null || !item.SpringAvailable))
+                throw new InvalidOperationException("이 캐릭터에는 신체 흔들림을 추가할 가슴·엉덩이 본이 없습니다.");
+            item.SpringPreset = preset;
+            RebuildSpring(item);
+            Seek(Seconds);
+        }
+
+        // Applies the preset to every character that can take it; returns how many.
+        public int ApplySpringToAll(string preset)
+        {
+            var count = 0;
+            foreach (var item in objects)
+                if (item.Motion != null && item.SpringAvailable) { item.SpringPreset = preset; RebuildSpring(item); count++; }
+            Seek(Seconds);
+            return count;
+        }
+
+        private void RebuildSpring(SceneObject item)
+        {
+            item.SpringBake = null; item.SpringStale = false;
+            if (item.SpringPreset == null || item.Motion == null) return;
+            var candidates = item.SpringCandidates
+                .Select(c => new MmdSpringCandidate { Bone = c.Bone, Name = c.Name, Part = c.Part, Weighted = c.Weighted, HasRigidBody = c.HasRigidBody && !item.SpringForceForTest })
+                .ToList();
+            item.SpringBake = new MmdSpringBake(item.Motion, item.Model, this, candidates, item.SpringPreset);
+            foreach (var entry in item.PhysicsStrength) item.SpringBake.SetStrength(entry.Key, entry.Value);
+        }
+
         // PH-04: strength of one physics part for a character (0..1). Instant, no re-bake.
         public void SetPhysicsStrength(string id, string part, float strength)
         {
@@ -381,12 +434,18 @@ namespace MmdStudio.Poc
             var item = Find(id);
             item.PhysicsStrength[part] = strength;
             item.Bake?.SetStrength(part, strength);
+            item.SpringBake?.SetStrength(part, strength);
             Seek(Seconds);
         }
 
         internal bool PhysicsBaking
         {
-            get { foreach (var item in objects) if (item.Bake != null && (item.BakeStale || !item.Bake.Complete)) return true; return false; }
+            get
+            {
+                foreach (var item in objects)
+                    if ((item.Bake != null && (item.BakeStale || !item.Bake.Complete)) || (item.SpringBake != null && (item.SpringStale || !item.SpringBake.Complete))) return true;
+                return false;
+            }
         }
 
         // One bake slice for the next character that needs it, then re-show its pose (the bake
@@ -397,12 +456,31 @@ namespace MmdStudio.Poc
             for (var n = 0; n < objects.Count; n++)
             {
                 var item = objects[(bakeCursor + n) % objects.Count];
-                if (item.Bake == null || (!item.BakeStale && item.Bake.Complete)) continue;
+                var physicsPending = item.Bake != null && (item.BakeStale || !item.Bake.Complete);
+                var springPending = item.SpringBake != null && (item.SpringStale || !item.SpringBake.Complete);
+                if (!physicsPending && !springPending) continue;
                 bakeCursor = (bakeCursor + n + 1) % objects.Count;
+                var budget = Playing ? PhysicsBudgetMilliseconds : PausedPhysicsBudgetMilliseconds;
+                if (!physicsPending)
+                {
+                    // PH-05 spring bake (cheap: one physics-OFF sample per tick).
+                    try
+                    {
+                        if (item.SpringStale) { item.SpringBake.Restart(); item.SpringStale = false; }
+                        item.SpringBake.Step(budget);
+                    }
+                    catch (Exception ex)
+                    {
+                        item.SpringBake = null; item.SpringPreset = null;
+                        Debug.LogWarning("Spring disabled for " + item.Id + ": " + ex.Message);
+                    }
+                    Show(item, Seconds);
+                    return;
+                }
                 try
                 {
                     if (item.BakeStale) { item.Bake.Restart(); item.BakeStale = false; }
-                    item.Bake.Step(Playing ? PhysicsBudgetMilliseconds : PausedPhysicsBudgetMilliseconds);
+                    item.Bake.Step(budget);
                 }
                 catch (Exception ex)
                 {
@@ -449,13 +527,14 @@ namespace MmdStudio.Poc
             placement.localScale = scale;
             // Physics runs in world space (gravity, ground), so a moved character is re-baked.
             if (changed && item.Bake != null) item.BakeStale = true;
+            if (changed && item.SpringBake != null) item.SpringStale = true;
             Seek(Seconds);
         }
         public void Clear()
         {
             foreach (var item in objects)
             {
-                item.Bake = null;
+                item.Bake = null; item.SpringBake = null;
                 if (item.Motion != null) item.Motion.ReleaseSceneClock(this);
                 if (item.Owner != null) item.Owner.Release();
             }

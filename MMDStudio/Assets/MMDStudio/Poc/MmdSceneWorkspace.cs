@@ -26,6 +26,12 @@ namespace MmdStudio.Poc
         private Toggle visible, loop, physics;
         private Label physicsInfo;
         private VisualElement physicsParts;
+        private DropdownField springPreset;
+        private Label springInfo;
+        private Button springAll;
+        private static readonly System.Collections.Generic.List<string> SpringChoices = new System.Collections.Generic.List<string> { "끔", "약", "중", "강" };
+        private static string SpringIdOf(string label) => label == "약" ? "light" : label == "중" ? "medium" : label == "강" ? "strong" : null;
+        private static string SpringLabelOf(string id) => id == null ? "끔" : MmdSpringBones.PresetLabels[id];
         private string physicsPartsKey;
         private Slider timeline, speed;
         private VisualElement transformSection, motionSection, materialSection, missingSection, emptyState;
@@ -159,6 +165,17 @@ namespace MmdStudio.Poc
             physicsInfo = Text(motionSection, "", "eds-note"); physicsInfo.name = "PhysicsInfo";
             // PH-04: per-part strength sliders for the parts the selected model has.
             physicsParts = new VisualElement { name = "PhysicsParts" }; motionSection.Add(physicsParts);
+            // PH-05: chest/hip spring bones for models that have the bones but no rigid bodies.
+            springPreset = new DropdownField("신체 흔들림", SpringChoices, 0) { name = "SpringPreset" }; motionSection.Add(springPreset);
+            springPreset.RegisterValueChangedCallback(evt => Guard(() => { if (Selected != null) { Scene.SetSpring(SelectedId, SpringIdOf(evt.newValue)); MarkDirty(); RefreshPhysicsInfo(); } }));
+            springInfo = Text(motionSection, "", "eds-note"); springInfo.name = "SpringInfo";
+            springAll = TextButton(motionSection, "SpringApplyAll", "모든 캐릭터에 적용", () => Guard(() =>
+            {
+                var id = SpringIdOf(springPreset.value) ?? "medium";
+                var count = Scene.ApplySpringToAll(id);
+                message = "신체 흔들림(" + MmdSpringBones.PresetLabels[id] + ")을 캐릭터 " + count + "명에게 적용했습니다. 모델 이용 규약을 확인하세요.";
+                MarkDirty();
+            }), "eds-button--block");
 
             materialSection = Section(content, "MaterialSection", "재질");
             materialInfo = Text(materialSection, "", "eds-section-text"); materialInfo.name = "MaterialInfo";
@@ -768,7 +785,17 @@ namespace MmdStudio.Poc
                 (selected.PhysicsJumpTicks > 0 ? "\n주의: 물리가 불안정한 구간이 있습니다(" + selected.PhysicsJumpTicks + "틱, 처음 " +
                     selected.PhysicsFirstJumpSeconds.ToString("0.0") + "초). 머리카락·옷이 튈 수 있습니다." : "");
             if (text != lastPhysicsText) { physicsInfo.text = text; Show(physicsInfo, text.Length > 0); lastPhysicsText = text; }
-            var parts = selected != null && selected.PhysicsEnabled ? selected.PhysicsParts : new string[0];
+            // PH-05 spring controls.
+            var springOk = selected != null && selected.Kind == MmdSceneService.ObjectKind.Character;
+            springPreset.SetEnabled(!Busy && springOk && selected.Motion != null && selected.SpringAvailable);
+            springPreset.SetValueWithoutNotify(SpringLabelOf(selected?.SpringPreset));
+            springAll.SetEnabled(!Busy && Scene.Objects.Any(o => o.Motion != null && o.SpringAvailable));
+            var springText = !springOk ? "" : selected.SpringSummary +
+                (selected.SpringPreset == null ? "" : selected.SpringReady ? "\n신체 흔들림 준비 완료" :
+                    "\n신체 흔들림 준비 중 " + (selected.SpringProgress * 100).ToString("0") + "%") +
+                (selected.SpringAvailable ? "\n원본 모델은 바꾸지 않습니다. 모델 이용 규약을 확인하세요." : "");
+            if (springInfo.text != springText) { springInfo.text = springText; Show(springInfo, springText.Length > 0); }
+            var parts = selected != null && (selected.PhysicsEnabled || selected.SpringPreset != null) ? selected.MotionParts : new string[0];
             var key = (selected?.Id ?? "") + "|" + string.Join(",", parts);
             if (key != physicsPartsKey)
             {

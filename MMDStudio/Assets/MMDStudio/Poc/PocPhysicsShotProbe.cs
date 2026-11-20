@@ -50,16 +50,28 @@ namespace MmdStudio.Poc
                 if (item == null || item.Motion == null || ui.Error.Length > 0) { Finish(reportPath, report, shots, differences, "load failed: " + ui.Error); yield break; }
                 ids.Add(item.Id);
             }
-            try { foreach (var id in ids) ui.Scene.SetPhysics(id, true); }
+            // -pocSpringShots: PH-05 spring check instead of physics. Sandrone's chest roots are
+            // forced to take the "strong" spring (test only; its physics stays off).
+            var springMode = PocArguments.Has("-pocSpringShots");
+            try
+            {
+                if (!springMode) foreach (var id in ids) ui.Scene.SetPhysics(id, true);
+                else
+                {
+                    var target = ui.Scene.Objects.First(o => o.Id == ids[1]);
+                    target.SpringForceForTest = true;
+                    ui.Scene.SetSpring(target.Id, "strong");
+                }
+            }
             catch (Exception ex) { Finish(reportPath, report, shots, differences, ex.ToString()); yield break; }
             var latest = plan.SelectMany(p => p.times).Max() + .1f;
-            for (var i = 0; i < 20000 && ui.Scene.Objects.Any(o => o.Bake != null && o.Bake.BakedSeconds < latest); i++)
+            for (var i = 0; i < 20000 && ui.Scene.Objects.Any(o => (o.Bake != null && o.Bake.BakedSeconds < latest) || (o.SpringBake != null && !o.SpringBake.Complete)); i++)
             {
                 ui.Scene.BakePhysicsSlice();
                 if (i % 2 == 0) yield return null;
             }
             ui.SetFocusView(true);
-            for (var c = 0; c < plan.Length; c++)
+            for (var c = springMode ? 1 : 0; c < plan.Length; c++)
             {
                 var item = ui.Scene.Objects.First(o => o.Id == ids[c]);
                 ui.Select(item.Id);
@@ -69,12 +81,13 @@ namespace MmdStudio.Poc
                     ui.FrameIds(item.Id);
                     yield return null;
                     var on = item.Model.bones.Select(b => b.position).ToArray();
-                    yield return Capture(Path.Combine(directory, plan[c].label + "_" + time.ToString("0.00") + "s_on.png"), shots);
+                    var prefix = (springMode ? "spring_" : "") + plan[c].label + "_" + time.ToString("0.00") + "s";
+                    yield return Capture(Path.Combine(directory, prefix + "_on.png"), shots);
                     // Physics-OFF pose at the same time and camera.
                     item.Motion.SampleFromSceneClock(ui.Scene, time);
                     var off = item.Model.bones.Select(b => b.position).ToArray();
                     differences.Add(on.Zip(off, (x, y) => Vector3.Distance(x, y)).Max());
-                    yield return Capture(Path.Combine(directory, plan[c].label + "_" + time.ToString("0.00") + "s_off.png"), shots);
+                    yield return Capture(Path.Combine(directory, prefix + "_off.png"), shots);
                     ui.Scene.Seek(time);
                 }
             }

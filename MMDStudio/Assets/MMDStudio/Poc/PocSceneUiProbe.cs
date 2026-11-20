@@ -23,7 +23,8 @@ namespace MmdStudio.Poc
             public string[] sceneOpenSlowestFrames;
             public string[] orphanLifetimes;
             public int physicsBakeFrames;
-            public float physicsPoseDifferenceM, physicsStrengthZeroDifferenceM;
+            public float physicsPoseDifferenceM, physicsStrengthZeroDifferenceM, springPoseDifferenceM, springZeroDifferenceM;
+            public int springBakeFrames;
             public int pmxLoadFrames;
             public string[] pmxStageTimings;
         }
@@ -581,6 +582,42 @@ namespace MmdStudio.Poc
                 ui.Root.Q<Toggle>("Physics").value = false;
                 Check("physics_flag_saved_reopened_and_turned_off", restored && !a2.PhysicsEnabled && !a2.PhysicsReady && ui.Error.Length == 0);
                 if (!ui.SaveTo(physicsFile)) throw new InvalidOperationException("physics scene save failed: " + ui.Error); // no unsaved prompt on reopen
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            // PH-05: chest/hip spring bones. Neither test model has chest/hip bones without rigid
+            // bodies (Gene has none, Sandrone's have rigid bodies), so the probe forces Sandrone's
+            // rigid-body chest roots to take a spring; its physics stays off here.
+            MmdSceneService.SceneObject springTarget = null; Vector3[] springOff = null;
+            try
+            {
+                springTarget = Find(ui, MmdSceneService.ObjectKind.Character, bModel);
+                var gene = Find(ui, MmdSceneService.ObjectKind.Character, aModel);
+                Activate(ui.Root, "object-" + gene.Id);
+                var geneBlocked = !ui.Root.Q<DropdownField>("SpringPreset").enabledSelf && ui.Root.Q<Label>("SpringInfo").text.Contains("없어");
+                springTarget.SpringForceForTest = true;
+                Activate(ui.Root, "object-" + springTarget.Id);
+                ui.Scene.Seek(2); springOff = springTarget.Motion.PosePositions();
+                ui.Root.Q<DropdownField>("SpringPreset").value = "중";
+                Check("spring_offered_only_where_bones_allow", geneBlocked && springTarget.SpringPreset == "medium" && ui.Dirty);
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            for (var i = 0; i < 3000 && !springTarget.SpringReady; i++) { ui.Scene.BakePhysicsSlice(); report.springBakeFrames++; yield return null; }
+            try
+            {
+                ui.Scene.Seek(2); var springOn = springTarget.Motion.PosePositions();
+                ui.Scene.Seek(.5); ui.Scene.Seek(2); var springAgain = springTarget.Motion.PosePositions();
+                report.springPoseDifferenceM = springOff.Zip(springOn, (x, y) => Vector3.Distance(x, y)).Max();
+                ui.RefreshPhysicsInfo();
+                ui.Root.Q<Slider>("PhysicsStrength-chest").value = 0;
+                ui.Scene.Seek(2); var springZero = springTarget.Motion.PosePositions();
+                ui.Root.Q<Slider>("PhysicsStrength-chest").value = 100;
+                report.springZeroDifferenceM = springOff.Zip(springZero, (x, y) => Vector3.Distance(x, y)).Max();
+                Check("spring_bake_moves_chest_repeatably_and_blends", springTarget.SpringReady && ui.Root.Q<Label>("SpringInfo").text.Contains("준비 완료") &&
+                    report.springPoseDifferenceM > 1e-4f && springOn.Zip(springAgain, (x, y) => Vector3.Distance(x, y)).Max() == 0 && report.springZeroDifferenceM < 1e-4f);
+                if (!ui.SaveTo(physicsFile)) throw new InvalidOperationException("spring scene save failed: " + ui.Error);
+                var saved = MmdSceneDocument.Read(physicsFile);
+                Check("spring_preset_saved_per_character", saved.sceneObjects.First(o => o.id == springTarget.Id).springPreset == "medium" &&
+                    saved.sceneObjects.Where(o => o.id != springTarget.Id).All(o => string.IsNullOrEmpty(o.springPreset)));
             }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
             // Back to the main scene file for the remaining checks.
