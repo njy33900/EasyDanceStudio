@@ -8,7 +8,8 @@ using UnityEngine;
 
 namespace MmdStudio.Poc
 {
-    // MVP-01: synchronous, physics-OFF scene model. UI/persistence are separate.
+    // MVP-01: synchronous scene model, physics OFF by default; PH-03 adds per-character
+    // experimental physics through a bake cache. UI/persistence are separate.
     [DefaultExecutionOrder(9000)] // Before pinned UMT's 10000 LateUpdate/SDEF pass.
     public sealed class MmdSceneService : MonoBehaviour
     {
@@ -26,8 +27,19 @@ namespace MmdStudio.Poc
             public MmdPocSummary Summary { get; internal set; }
             public bool Visible { get; internal set; } = true;
             public Transform Placement => Owner.transform;
+            // PH-03: experimental physics, baked ahead of playback (MmdPhysicsBake). While a time
+            // is not baked yet the physics-OFF pose is shown.
+            public bool PhysicsEnabled { get; internal set; }
+            internal MmdPhysicsBake Bake { get; set; }
+            internal bool BakeStale { get; set; }
+            public float PhysicsProgress => Bake == null || BakeStale ? 0 : Bake.Progress;
+            public bool PhysicsReady => Bake != null && !BakeStale && Bake.Complete;
+            public string PhysicsError { get; internal set; }
         }
         private readonly List<SceneObject> objects = new List<SceneObject>();
+        // Per-frame physics bake budget (ms). One character is baked per frame, round-robin.
+        public double PhysicsBudgetMilliseconds { get; set; } = 8;
+        private int bakeCursor;
         private int settleThroughFrame = -1;
         private bool skipNextAdvance;
         public IReadOnlyList<SceneObject> Objects => objects.AsReadOnly();
@@ -260,6 +272,7 @@ namespace MmdStudio.Poc
             }
             item.Motion = candidate;
             item.MotionSource = Path.GetFullPath(path);
+            if (item.PhysicsEnabled) RebuildBake(item);
             Seek(Seconds);
         }
 
@@ -293,6 +306,7 @@ namespace MmdStudio.Poc
             }
             item.Motion = candidate;
             item.MotionSource = Path.GetFullPath(path);
+            if (item.PhysicsEnabled) RebuildBake(item);
             Seek(Seconds);
         }
 
@@ -300,6 +314,7 @@ namespace MmdStudio.Poc
         {
             var item = Find(id);
             objects.Remove(item);
+            item.Bake = null;
             if (item.Motion != null) item.Motion.ReleaseSceneClock(this);
             item.Owner.Release();
             if (objects.Count == 0) { Playing = false; Seconds = 0; }
@@ -313,8 +328,66 @@ namespace MmdStudio.Poc
             foreach (var item in objects)
                 if (item.Motion != null && (!item.Motion.OwnsSceneClock(this) || item.Motion.Playing))
                     throw new InvalidOperationException("A scene motion lost exclusive clock ownership");
-            foreach (var item in objects) if (item.Motion != null) item.Motion.SampleFromSceneClock(this, (float)time);
+            foreach (var item in objects) Show(item, time);
             Seconds = time;
+        }
+
+        private void Show(SceneObject item, double time)
+        {
+            if (item.Motion == null) return;
+            item.Motion.SampleFromSceneClock(this, (float)time);
+            if (item.Bake != null && !item.BakeStale) item.Bake.Apply((float)time);
+        }
+
+        // Turns experimental physics on/off for a character. Turning it on starts a fresh bake from
+        // time zero; the pose follows the bake as it advances.
+        public void SetPhysics(string id, bool enabled)
+        {
+            var item = Find(id);
+            if (enabled && (item.Kind != ObjectKind.Character || item.Motion == null))
+                throw new InvalidOperationException("물리는 VMD가 연결된 캐릭터에만 켤 수 있습니다.");
+            item.PhysicsEnabled = enabled;
+            item.PhysicsError = null;
+            if (enabled) RebuildBake(item); else { item.Bake = null; item.BakeStale = false; }
+            Seek(Seconds);
+        }
+
+        private void RebuildBake(SceneObject item)
+        {
+            item.Bake = null; item.BakeStale = false; item.PhysicsError = null;
+            if (item.Motion == null) return;
+            try { item.Bake = new MmdPhysicsBake(item.Motion, item.Model, this); }
+            catch (Exception ex) { item.PhysicsEnabled = false; item.PhysicsError = ex.Message; Debug.LogWarning("Physics disabled: " + ex.Message); }
+        }
+
+        internal bool PhysicsBaking
+        {
+            get { foreach (var item in objects) if (item.Bake != null && (item.BakeStale || !item.Bake.Complete)) return true; return false; }
+        }
+
+        // One bake slice for the next character that needs it, then re-show its pose (the bake
+        // moves the bones). A failure turns physics off for that character only.
+        private void BakeSlice()
+        {
+            if (objects.Count == 0) return;
+            for (var n = 0; n < objects.Count; n++)
+            {
+                var item = objects[(bakeCursor + n) % objects.Count];
+                if (item.Bake == null || (!item.BakeStale && item.Bake.Complete)) continue;
+                bakeCursor = (bakeCursor + n + 1) % objects.Count;
+                try
+                {
+                    if (item.BakeStale) { item.Bake.Restart(); item.BakeStale = false; }
+                    item.Bake.Step(PhysicsBudgetMilliseconds);
+                }
+                catch (Exception ex)
+                {
+                    item.Bake = null; item.PhysicsEnabled = false; item.PhysicsError = ex.Message;
+                    Debug.LogWarning("Physics disabled for " + item.Id + ": " + ex.Message);
+                }
+                Show(item, Seconds);
+                return;
+            }
         }
 
         public void Advance(double deltaSeconds)
@@ -344,16 +417,21 @@ namespace MmdStudio.Poc
                 if (!Finite(value)) throw new ArgumentOutOfRangeException("placement");
             if (scale.x < .001f || scale.y < .001f || scale.z < .001f || scale.x > 1000 || scale.y > 1000 || scale.z > 1000)
                 throw new ArgumentOutOfRangeException("scale", "크기는 0.001~1000 범위여야 합니다.");
-            var placement = Find(id).Placement;
+            var item = Find(id);
+            var placement = item.Placement;
+            var changed = placement.localPosition != position || placement.localEulerAngles != rotation || placement.localScale != scale;
             placement.localPosition = position;
             placement.localEulerAngles = rotation;
             placement.localScale = scale;
+            // Physics runs in world space (gravity, ground), so a moved character is re-baked.
+            if (changed && item.Bake != null) item.BakeStale = true;
             Seek(Seconds);
         }
         public void Clear()
         {
             foreach (var item in objects)
             {
+                item.Bake = null;
                 if (item.Motion != null) item.Motion.ReleaseSceneClock(this);
                 if (item.Owner != null) item.Owner.Release();
             }
@@ -367,7 +445,10 @@ namespace MmdStudio.Poc
             if (Time.frameCount <= settleThroughFrame) Seek(Seconds);
             if (skipNextAdvance) skipNextAdvance = false;
             else if (AutomaticClock) Advance(Time.unscaledDeltaTime);
+            if (AutomaticClock) BakeSlice();
         }
+        // Probe hook: one bake slice without the automatic clock.
+        internal void BakePhysicsSlice() => BakeSlice();
         private void LateUpdate()
         {
             // Also cover imports issued after this component's Update, before

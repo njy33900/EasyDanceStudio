@@ -36,6 +36,8 @@ namespace MmdStudio.Poc
         public Vector3 rotationEuler;
         public Vector3 scale = Vector3.one;
         public bool visible = true;
+        // PH-03 (optional, default false): experimental physics for this character.
+        public bool physics;
     }
 
     [Serializable]

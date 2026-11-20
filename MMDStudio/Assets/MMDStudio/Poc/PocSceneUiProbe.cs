@@ -22,6 +22,8 @@ namespace MmdStudio.Poc
             public int sceneOpenFrames;
             public string[] sceneOpenSlowestFrames;
             public string[] orphanLifetimes;
+            public int physicsBakeFrames;
+            public float physicsPoseDifferenceM;
             public int pmxLoadFrames;
             public string[] pmxStageTimings;
         }
@@ -519,6 +521,65 @@ namespace MmdStudio.Poc
                     ui.Scene.CandidateCount == 0 && a.Motion != null && b.Motion != null && ui.Scene.Duration == duration &&
                     UnityEngine.Object.FindObjectsByType<PocAssetLifetime>(FindObjectsInactive.Include, FindObjectsSortMode.None).Length == lifetimesBefore &&
                     a.Model.root.GetComponentsInChildren<Renderer>().All(renderer => renderer.enabled));
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+
+            // PH-03: experimental per-character physics (bake cache) through the inspector toggle.
+            var physicsFile = Path.Combine(project, "physics.mmdscene");
+            Vector3[] offPose = null, onPose = null;
+            try
+            {
+                Activate(ui.Root, "object-" + stage.Id);
+                var stageBlocked = !ui.Root.Q<Toggle>("Physics").enabledSelf;
+                Activate(ui.Root, "object-" + a.Id);
+                ui.Scene.Seek(2); offPose = a.Motion.PosePositions();
+                var enabledForCharacter = ui.Root.Q<Toggle>("Physics").enabledSelf;
+                ui.Root.Q<Toggle>("Physics").value = true;
+                Check("physics_toggle_only_for_characters_with_motion", stageBlocked && enabledForCharacter && a.PhysicsEnabled && !b.PhysicsEnabled && ui.Dirty);
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            for (var i = 0; i < 3000 && !a.PhysicsReady; i++) { ui.Scene.BakePhysicsSlice(); report.physicsBakeFrames++; yield return null; }
+            try
+            {
+                ui.RefreshPhysicsInfo();
+                ui.Scene.Seek(2); onPose = a.Motion.PosePositions();
+                ui.Scene.Seek(.5); ui.Scene.Seek(2);
+                var again = a.Motion.PosePositions();
+                report.physicsPoseDifferenceM = offPose.Zip(onPose, (x, y) => Vector3.Distance(x, y)).Max();
+                Check("physics_bake_completes_changes_pose_and_repeats", a.PhysicsReady && ui.Root.Q<Label>("PhysicsInfo").text.Contains("준비 완료") &&
+                    report.physicsPoseDifferenceM > 1e-3f && onPose.Zip(again, (x, y) => Vector3.Distance(x, y)).Max() == 0);
+                ui.Scene.SetPlacement(a.Id, a.Placement.localPosition + new Vector3(.1f, 0, 0), a.Placement.localEulerAngles, a.Placement.localScale);
+                if (a.PhysicsReady) throw new InvalidOperationException("placement change did not invalidate the physics bake");
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            for (var i = 0; i < 3000 && !a.PhysicsReady; i++) { ui.Scene.BakePhysicsSlice(); yield return null; }
+            try
+            {
+                Check("physics_rebakes_after_placement_change", a.PhysicsReady);
+                if (!ui.SaveTo(physicsFile)) throw new InvalidOperationException("physics scene save failed: " + ui.Error);
+                var saved = MmdSceneDocument.Read(physicsFile);
+                if (!saved.sceneObjects.First(o => o.id == a.Id).physics || saved.sceneObjects.First(o => o.id == b.Id).physics)
+                    throw new InvalidOperationException("physics flag not saved per character");
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return ui.OpenFrom(physicsFile);
+            try
+            {
+                var a2 = Find(ui, MmdSceneService.ObjectKind.Character, aModel); var b2 = Find(ui, MmdSceneService.ObjectKind.Character, bModel);
+                Activate(ui.Root, "object-" + a2.Id);
+                var restored = a2.PhysicsEnabled && !b2.PhysicsEnabled && ui.Root.Q<Toggle>("Physics").value;
+                ui.Root.Q<Toggle>("Physics").value = false;
+                Check("physics_flag_saved_reopened_and_turned_off", restored && !a2.PhysicsEnabled && !a2.PhysicsReady && ui.Error.Length == 0);
+                if (!ui.SaveTo(physicsFile)) throw new InvalidOperationException("physics scene save failed: " + ui.Error); // no unsaved prompt on reopen
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            // Back to the main scene file for the remaining checks.
+            yield return ui.OpenFrom(sceneFile);
+            try
+            {
+                a = Find(ui, MmdSceneService.ObjectKind.Character, aModel); b = Find(ui, MmdSceneService.ObjectKind.Character, bModel);
+                stage = Find(ui, MmdSceneService.ObjectKind.Stage, stageModel);
+                if (ui.Error.Length > 0 || a == null || a.PhysicsEnabled) throw new InvalidOperationException("main scene reopen failed: " + ui.Error);
             }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
             yield return ui.OpenFrom(Path.Combine(project, "corrupt.mmdscene"));

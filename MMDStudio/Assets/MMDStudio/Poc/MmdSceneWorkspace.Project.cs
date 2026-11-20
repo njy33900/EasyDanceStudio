@@ -152,7 +152,7 @@ namespace MmdStudio.Poc
                     type = item.Kind == MmdSceneService.ObjectKind.Stage ? SceneObjectData.StageType : SceneObjectData.CharacterType,
                     assetPath = MmdSceneDocument.ToStored(sceneFile, item.ModelSource), motionPath = motion,
                     position = item.Placement.localPosition, rotationEuler = item.Placement.localEulerAngles, scale = item.Placement.localScale,
-                    visible = item.Visible,
+                    visible = item.Visible, physics = item.PhysicsEnabled,
                 };
             }
             SceneObjectData Missing(UnresolvedItem item)
@@ -283,6 +283,13 @@ namespace MmdStudio.Poc
                     documentOrder.AddRange(order);
                     foreach (var entry in pendingUnresolved) unresolved[entry.Key] = entry.Value;
                     foreach (var entry in pendingMotions) unresolvedMotions[entry.Key] = entry.Value;
+                    // PH-03: re-enable experimental physics (the bake restarts from zero).
+                    foreach (var data in file.sceneObjects)
+                    {
+                        if (!data.physics) continue;
+                        var live = Scene.Objects.FirstOrDefault(item => item.Id == data.id);
+                        if (live != null && live.Motion != null) Scene.SetPhysics(live.Id, true);
+                    }
                     Graphics.Apply(file.graphics);
                     View.Set(file.view.pivot, file.view.yaw, file.view.pitch, file.view.distance); View.Apply(Camera.main);
                     Scene.Loop = file.timeline.loop; Scene.Speed = file.timeline.speed;

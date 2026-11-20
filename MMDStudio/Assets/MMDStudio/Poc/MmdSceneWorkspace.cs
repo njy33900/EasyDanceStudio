@@ -23,7 +23,8 @@ namespace MmdStudio.Poc
         private Button add, addStage, connect, remove, play, stop, skipStart;
         private MmdIcon playIcon;
         private Vector3Field position, rotation, scale;
-        private Toggle visible, loop;
+        private Toggle visible, loop, physics;
+        private Label physicsInfo;
         private Slider timeline, speed;
         private VisualElement transformSection, motionSection, materialSection, missingSection, emptyState;
         private Label missingInfo;
@@ -150,6 +151,10 @@ namespace MmdStudio.Poc
             motionSection = Section(content, "MotionSection", "모션");
             motionInfo = Text(motionSection, "", "eds-section-text"); motionInfo.name = "MotionInfo";
             connect = TextButton(motionSection, "ConnectMotion", "VMD 연결", () => Pick(PickKind.Motion), "eds-button--block");
+            // PH-03: experimental per-character physics, baked ahead of playback.
+            physics = new Toggle("물리 (실험)") { name = "Physics" }; motionSection.Add(physics);
+            physics.RegisterValueChangedCallback(evt => Guard(() => { if (Selected != null) { Scene.SetPhysics(SelectedId, evt.newValue); MarkDirty(); RefreshPhysicsInfo(); } }));
+            physicsInfo = Text(motionSection, "", "eds-note"); physicsInfo.name = "PhysicsInfo";
 
             materialSection = Section(content, "MaterialSection", "재질");
             materialInfo = Text(materialSection, "", "eds-section-text"); materialInfo.name = "MaterialInfo";
@@ -333,6 +338,8 @@ namespace MmdStudio.Poc
             Refresh();
         }
         private void FrameAll() { Frame(Scene.Objects.Where(item => item.Visible)); }
+        // Probe hook: frame the given objects.
+        internal void FrameIds(params string[] ids) { Frame(Scene.Objects.Where(item => ids.Contains(item.Id))); }
         private void FrameSelected()
         {
             if (Selected != null) Frame(new[] { Selected }); else FrameAll();
@@ -665,6 +672,7 @@ namespace MmdStudio.Poc
             position.SetEnabled(!Busy && selected != null); rotation.SetEnabled(!Busy && selected != null); scale.SetEnabled(!Busy && selected != null);
             visible.SetEnabled(!Busy && selected != null);
             Show(transformSection, selected != null); Show(motionSection, isCharacter); Show(materialSection, selected != null);
+            RefreshPhysicsInfo();
             ShowGraphicsSections(Target);
             if (selected != null)
             {
@@ -735,6 +743,24 @@ namespace MmdStudio.Poc
             UpdateClock();
             if (DeviceInput) ReadDevices();
             RefreshFocusNotice();
+            RefreshPhysicsInfo();
+        }
+        // Bake progress for the selected character; also on the status bar while any bake runs.
+        private string lastPhysicsText;
+        internal void RefreshPhysicsInfo()
+        {
+            if (physics == null || Scene == null) return;
+            var selected = Selected;
+            var available = selected != null && selected.Kind == MmdSceneService.ObjectKind.Character && selected.Motion != null;
+            physics.SetEnabled(!Busy && available);
+            physics.SetValueWithoutNotify(selected != null && selected.PhysicsEnabled);
+            var text = selected == null || selected.Kind != MmdSceneService.ObjectKind.Character ? "" :
+                selected.PhysicsError != null ? "물리를 끈 이유: " + selected.PhysicsError :
+                !available ? "VMD를 연결하면 물리를 켤 수 있습니다." :
+                !selected.PhysicsEnabled ? "머리카락·옷·신체 등 모델의 모든 강체를 미리 계산해 재생합니다." :
+                selected.PhysicsReady ? "물리 준비 완료 · 어느 시간으로 이동해도 같은 결과" :
+                "물리 준비 중 " + (selected.PhysicsProgress * 100).ToString("0") + "% · 준비된 구간까지 물리로 재생";
+            if (text != lastPhysicsText) { physicsInfo.text = text; Show(physicsInfo, text.Length > 0); lastPhysicsText = text; }
         }
         // The automated probe drives ProcessViewportInput directly and disables device reads.
         internal bool DeviceInput { get; set; } = true;

@@ -19,8 +19,39 @@ namespace UMT
                     physical[body.relatedBoneIndex] = true;
         }
 
+        // PH-03: bones whose pose depends on physics — bones of non-kinetic rigid bodies plus the
+        // after-physics pass. A physics bake stores only these; every other bone comes from the
+        // ordinary physics-OFF motion sample.
+        public int[] PhysicsAffectedBones()
+        {
+            var result = new System.Collections.Generic.SortedSet<int>();
+            for (var i = 0; i < physical.Length; i++) if (physical[i]) result.Add(i);
+            var after = manager.Context.afterPhysicsBoneIndices;
+            for (var i = 0; i < after.Length; i++) result.Add(after[i]);
+            return new System.Collections.Generic.List<int>(result).ToArray();
+        }
+
+        // PH-03: the ordinary physics-OFF sample (SolveTransforms) rewrites the shared bone solver
+        // state, which also holds the physical bones' simulation history. A bake interleaved with
+        // on-screen sampling saves the state after each step and restores it before the next.
+        private MMDBoneTransform.BoneSolverState[] savedState;
+        public void SaveState()
+        {
+            ref var context = ref manager.Context;
+            if (savedState == null || savedState.Length != context.boneStateData.Length)
+                savedState = new MMDBoneTransform.BoneSolverState[context.boneStateData.Length];
+            context.boneStateData.CopyTo(savedState);
+        }
+
+        public void RestoreState()
+        {
+            if (savedState == null) throw new InvalidOperationException("No saved physics solver state");
+            manager.Context.boneStateData.CopyFrom(savedState);
+        }
+
         public void Reset()
         {
+            savedState = null;
             manager.ResetToBindPose();
             ref var context = ref manager.Context;
             for (var i = 0; i < context.boneStateData.Length; i++)

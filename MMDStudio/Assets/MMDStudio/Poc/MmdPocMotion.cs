@@ -447,6 +447,16 @@ namespace MmdStudio.Poc
         // Mono-only diagnostic hook; production playback leaves this null.
         internal Action<MMDTransformManager, float> DiagnosticPhysicsSolve;
 
+        // PH-03: one physics bake step for a motion owned by the scene clock. The bake never owns
+        // the displayed pose; the scene re-samples (and applies the cache) after each bake slice.
+        internal void SampleBakeStep(object owner, float seconds, float deltaSeconds, MmdStatefulPhysicsSolver solver)
+        {
+            if (!OwnsSceneClock(owner) || Playing) throw new InvalidOperationException("Physics bake requires the scene clock owner");
+            sceneSampling = true;
+            try { SampleStatefulPhysics(seconds, deltaSeconds, solver); }
+            finally { sceneSampling = false; }
+        }
+
         internal void SampleStatefulPhysics(float seconds, float deltaSeconds, MmdStatefulPhysicsSolver solver)
         {
             if (bakedReference || directTracks == null) throw new InvalidOperationException("Stateful physics requires direct VMD mode");

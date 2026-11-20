@@ -23,3 +23,10 @@ UI 126/126, 복원 9/9, 비교 프로브 3모델 동일, 진행 콜백 예외 VM
 1. 커밋(사용자 요청 시). 58 MB 추가가 들어간다. `.gitattributes`에 `*.sh text eol=lf` 추가 제안 미처리.
 2. **PH-00 측정 완료**(`docs/PH00_PHYSICS_INTEGRATION.md` 4~5절, `run-physics-measure.sh`): Sandrone 한 틱 11 ms·30초 시킹 20초 → 굽기 캐시가 재생 기본 경로(명세 PH-03 갱신). 다음 작업: **PH-03 굽기 캐시 설계·구현**(프레임 분할 백그라운드 계산, 캐시 크기 결정), Gene 망토 추 강체 불안정의 화면 확인·원인 조사, 엉덩이 강체 있는 모델 확보, 배경 강체 충돌 측정.
 3. H1 남은 검증: Debug IL2CPP, 중급 PC. 패치 #1의 굽기 경로·카메라 변환 미적용.
+
+## 추가 (같은 날, 커밋 `4a7f356` 이후 — 미커밋)
+
+- **PH-03 굽기 캐시 엔진** 구현·검증(`docs/PH00_PHYSICS_INTEGRATION.md` 6절): `Poc/MmdPhysicsBake.cs`, `UMTExtensions/MmdStatefulPhysicsSolver.cs`(영향 본·상태 저장/복원), `MmdPocMotion.SampleBakeStep`, `PocPhysicsBakeProbe` + `scripts/bash/run-physics-bake.sh`. 오차 5.4 μm/0.7 μm, 상태 복원 없이 4.36 m(음성 대조).
+- 다음: 캐시 압축(Sandrone 158 MB), 장면 연결(캐릭터별 물리 토글, 장면 샘플에서 Apply, 굽기 진행·취소, 교체·삭제 시 무효화), 굽기 시간 단축(Sandrone 약 3분).
+- **장면 연결(실험)**: 인스펙터 "물리 (실험)" 토글, `MmdSceneService.SetPhysics`/라운드로빈 굽기, `SceneObjectData.physics`. UI 프로브 130(+4)·복원 9 통과(Release IL2CPP). `Invoke-SceneVerification.ps1` UI 기준 130. ADR-017의 "게이트 전 UI OFF"는 사용자 요청으로 실험 토글(기본 OFF)로 앞당김 — 게이트(튐 검사·성능·화면 확인)는 미통과. Gene 2초 포즈가 OFF 대비 0.79 m 다름(망토 추 불안정 추정, 화면 확인 필요).
+- **화면 확인**(`docs/PH00_PHYSICS_INTEGRATION.md` 8절, `run-physics-shots.sh`): Sandrone 물리 정상(치마·머리·리본), Gene 9 m 튐은 화면에 없는 망토 추 본. 다음: 튐 검사를 가중치 있는 본으로 한정, 연속 재생 영상 확인, 캐시 압축·굽기 속도, 엉덩이 강체 모델 확보.

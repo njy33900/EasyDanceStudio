@@ -42,6 +42,8 @@ namespace MmdStudio.Poc
             }
             if (path == null)
             {
+                var physicsBakeReport = PocArguments.Value("-pocPhysicsBakeReport");
+                if (physicsBakeReport != null) { yield return gameObject.AddComponent<PocPhysicsBakeProbe>().Run(physicsBakeReport); yield break; }
                 var physicsMeasureReport = PocArguments.Value("-pocPhysicsMeasureReport");
                 if (physicsMeasureReport != null) { yield return gameObject.AddComponent<PocPhysicsMeasureProbe>().Run(physicsMeasureReport); yield break; }
                 var stagingReport = PocArguments.Value("-pocPmxStagingReport");
@@ -54,19 +56,21 @@ namespace MmdStudio.Poc
                 var restoreReport = PocArguments.Value("-pocSceneRestoreReport");
                 var perfReport = PocArguments.Value("-pocScenePerfReport");
                 var cycleReport = PocArguments.Value("-pocSceneCycleReport");
+                var physicsShots = PocArguments.Value("-pocPhysicsShots");
                 var sceneFile = PocArguments.Value("-sceneFile");
                 var legacyProbe = PocArguments.HasAny("-pocRecoveryReport", "-pocCameraReport", "-pocDeformationReport",
                     "-pocPhysicsReport", "-pocPhysicsEnduranceReport", "-pocPhysicsReferenceReport",
                     "-pocPhysicsLifecycleReport", "-pocPhysicsFeatureReport", "-pocPhysicsRealMotionReport", "-pocSceneReport");
                 // Double-clicking the current Player opens the studio. Older diagnostic
                 // routes remain explicit so their probes and single-model launcher still work.
-                if (sceneUiReport != null || restoreReport != null || perfReport != null || cycleReport != null || sceneFile != null ||
+                if (sceneUiReport != null || restoreReport != null || perfReport != null || cycleReport != null || physicsShots != null || sceneFile != null ||
                     PocArguments.Has("-sceneUi") || (!PocArguments.Has("-legacyWorkspace") && !legacyProbe))
                 {
                     var sceneUi = gameObject.AddComponent<MmdSceneWorkspace>(); sceneUi.Initialize();
                     Debug.Log("EasyDanceStudio: scene workspace started.");
                     if (sceneUiReport != null) yield return gameObject.AddComponent<PocSceneUiProbe>().Run(sceneUi, sceneUiReport);
                     else if (restoreReport != null) yield return gameObject.AddComponent<PocSceneRestoreProbe>().Run(sceneUi, restoreReport, sceneFile);
+                    else if (physicsShots != null) yield return gameObject.AddComponent<PocPhysicsShotProbe>().Run(sceneUi, physicsShots);
                     else if (cycleReport != null) yield return gameObject.AddComponent<PocSceneCycleProbe>().Run(sceneUi, cycleReport, sceneFile);
                     else if (perfReport != null) yield return gameObject.AddComponent<PocScenePerformanceProbe>().Run(sceneUi, perfReport);
                     else if (sceneFile != null) yield return sceneUi.OpenFrom(sceneFile);
