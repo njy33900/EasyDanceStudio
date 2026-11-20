@@ -2,6 +2,12 @@
 
 기준일: **2026-11-19 (한국 시간)**. 사용자가 Codex에서 진행하던 작업을 Claude로 이어서 진행하도록 요청하여 작성한 현재 상태 요약이다. 같은 날 Claude가 MVP-03(뷰포트 조작·선택 강조), MVP-04(PMX 배경), MVP-05(뷰포트 클릭 선택·단축키·삭제 확인), MVP-06(카메라·조명·기본 그래픽), MVP-07(`.mmdscene` 저장/복원), MVP-08(밝은 미니멀 UI 재디자인), MVP-09(통합·성능 보고서·알려진 문제), MVP-10(W/E/R 변형 기즈모)을 구현·검증하고 이 문서를 갱신했다. **1차 MVP 기능은 기즈모까지 구현·자동 검증 완료, 사람의 수동 확인·클린 PC·중급 PC 측정이 남았다.**
 
+> **최신 인계는 [docs/handoff/](docs/handoff/README.md) 폴더를 먼저 본다** (현재: `2026-11-19_H1-01a_to_H1-01b.md`). 이 파일은 전체 배경과 이력이다.
+>
+> **Codex 검토 요청과 다음 스텝 후보는 [REVIEW_FOR_CODEX.md](REVIEW_FOR_CODEX.md)에 정리했다.** 이 문서는 현재 상태 기준이다.
+>
+> **업데이트 (2026-11-19):** 현재 브랜치는 `v0.6`(`015177a`, PR #1로 main에 합쳐짐). 고도화 계획은 [docs/ENHANCEMENT_SPEC_v0.4.md](docs/ENHANCEMENT_SPEC_v0.4.md)(v0.2·v0.3 대체, 8절 결정 확정 — ADR-016). 그 첫 티켓 **R0-02a 누락 참조 보존**을 완료했다(미커밋): 불러오지 못한 PMX/VMD 항목을 문서에 그대로 보존하고, 저장 시 유지, 다른 폴더 저장 시 경로 재계산, 명시적 삭제만 허용, 항목 ID 안정화. 4개 빌드 UI 100 + 복원 9 통과, 출력 `out/<configuration>/R0-02a-<backend>/`. 상세 `docs/UNRESOLVED_REFERENCES.md`.
+
 ## 먼저 확인할 상태
 
 - 작업 디렉터리: `E:\workspace\EasyDanceStudio`

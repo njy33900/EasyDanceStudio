@@ -5,6 +5,7 @@
 ## Not yet checked by a person
 
 1. **Physical mouse and keyboard input.** All viewport, gizmo, shortcut and dialog checks feed synthetic per-frame input into the app's own handler; real device input through the Input System was not exercised automatically.
+   V0 adds H/Esc focus view and a View menu; these also need actual input confirmation. The current development PC reports 150% system DPI and passed 1280×720/1600×900 internal layout/picking checks; 100% DPI and moving the window between monitors remain unchecked.
 2. **Native file dialogs.** Open/save dialogs are exercised through their result handlers; clicking through the Windows dialogs has not been re-checked since MVP-02.
 3. **Real third-party stage PMX.** Only the generated synthetic stage was tested (2 textures, 100 vertices). Large meshes, many/missing textures, transparency and stage-specific materials are unverified.
 4. **Clean Windows machine.** Every run used the development PC. The native inventory (2026-11-19, all four MVP-08 outputs pass x64/exports/notices) shows that only `UMTNativePlugin.dll` needs the Visual C++ 2015–2022 runtime (`VCRUNTIME140.dll`, `VCRUNTIME140_1.dll`, UCRT); it is **not shipped** with the build. On a machine without that redistributable the plugin may fail to load. With physics OFF it may never be loaded, but that is unconfirmed. Release packaging should bundle the redistributable (or app-local runtime DLLs under Microsoft's redistribution terms) and be checked on a clean VM.
@@ -18,8 +19,9 @@
 - **Material and UV morphs** are not played; they are listed as warnings in the inspector's 재질 section.
 - **Camera VMD** is not connected to the shared clock (legacy preview only, P1).
 - **No audio** (P1), **no recent files or settings screen** (P1), **no drag and drop** (dropped by decision).
-- Loading is **synchronous**: the window shows a loading message but does not respond during a PMX/VMD import (about 0.6–1.1 s each for the test models; scene open about 1.8–2.4 s).
-- Missing files in a scene are skipped and listed; **re-linking** them requires re-adding and saving.
+- UI PMX/VMD imports now show stages and accept a cancel request between safe boundaries. Texture, material and rename stages are now split (H1-01b): the Release IL2CPP Sandrone PMX import takes 0.795 s with a 55.8 ms worst frame (was 1.043 s / 489.6 ms). Remaining single-frame costs: one large texture decode (~50 ms) and one rename category (up to ~94 ms for Gene). The `.mmdscene` open path is now a cancellable transaction that keeps the current scene until the new one is fully prepared (H1-01c; Release IL2CPP 1.98 s / 66 ms worst frame, Release Mono 2.04 s / 68 ms, Debug Mono 2.74 s / 128 ms). H1-01 is only partly implemented; see `H1_LOADING_STAGE1.md`.
+- If pinned UMT fails inside Unity object creation, its async builder does not return partial resources, so full mesh/material/texture cleanup is not yet proven. Malformed-input and repeated cancel/retry resource tests remain.
+- Missing files in a scene are kept as unresolved entries (R0-02a) and survive saving; **re-linking** them to a new path is not implemented yet (H1-02).
 - Clicking a dense model bakes its mesh for picking; per-click cost on very dense stages is unmeasured.
 - Strings are in code (Korean); localisation resources are not separated yet.
 

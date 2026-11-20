@@ -8,6 +8,12 @@ namespace MmdStudio.Poc
 {
     public static class PocArguments
     {
+        public static bool Has(string name) => Array.IndexOf(Environment.GetCommandLineArgs(), name) >= 0;
+        public static bool HasAny(params string[] names)
+        {
+            foreach (var name in names) if (Has(name)) return true;
+            return false;
+        }
         public static string Value(string name)
         {
             var args = Environment.GetCommandLineArgs();
@@ -36,15 +42,30 @@ namespace MmdStudio.Poc
             }
             if (path == null)
             {
+                var stagingReport = PocArguments.Value("-pocPmxStagingReport");
+                if (stagingReport != null)
+                {
+                    yield return gameObject.AddComponent<PocPmxStagingProbe>().Run(stagingReport);
+                    yield break;
+                }
                 var sceneUiReport = PocArguments.Value("-pocSceneUiReport");
                 var restoreReport = PocArguments.Value("-pocSceneRestoreReport");
                 var perfReport = PocArguments.Value("-pocScenePerfReport");
+                var cycleReport = PocArguments.Value("-pocSceneCycleReport");
                 var sceneFile = PocArguments.Value("-sceneFile");
-                if (sceneUiReport != null || restoreReport != null || perfReport != null || Array.IndexOf(Environment.GetCommandLineArgs(), "-sceneUi") >= 0)
+                var legacyProbe = PocArguments.HasAny("-pocRecoveryReport", "-pocCameraReport", "-pocDeformationReport",
+                    "-pocPhysicsReport", "-pocPhysicsEnduranceReport", "-pocPhysicsReferenceReport",
+                    "-pocPhysicsLifecycleReport", "-pocPhysicsFeatureReport", "-pocPhysicsRealMotionReport", "-pocSceneReport");
+                // Double-clicking the current Player opens the studio. Older diagnostic
+                // routes remain explicit so their probes and single-model launcher still work.
+                if (sceneUiReport != null || restoreReport != null || perfReport != null || cycleReport != null || sceneFile != null ||
+                    PocArguments.Has("-sceneUi") || (!PocArguments.Has("-legacyWorkspace") && !legacyProbe))
                 {
                     var sceneUi = gameObject.AddComponent<MmdSceneWorkspace>(); sceneUi.Initialize();
+                    Debug.Log("EasyDanceStudio: scene workspace started.");
                     if (sceneUiReport != null) yield return gameObject.AddComponent<PocSceneUiProbe>().Run(sceneUi, sceneUiReport);
                     else if (restoreReport != null) yield return gameObject.AddComponent<PocSceneRestoreProbe>().Run(sceneUi, restoreReport, sceneFile);
+                    else if (cycleReport != null) yield return gameObject.AddComponent<PocSceneCycleProbe>().Run(sceneUi, cycleReport, sceneFile);
                     else if (perfReport != null) yield return gameObject.AddComponent<PocScenePerformanceProbe>().Run(sceneUi, perfReport);
                     else if (sceneFile != null) yield return sceneUi.OpenFrom(sceneFile);
                     else if (PocArguments.Value("-pocPmx") != null)

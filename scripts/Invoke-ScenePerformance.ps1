@@ -9,7 +9,7 @@ param(
 )
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
-$exe=Join-Path (Join-Path (Join-Path $root 'out') $Configuration.ToLowerInvariant()) "MVP-10-$Backend\MmdStudioPoC.exe"
+$exe=Join-Path (Join-Path (Join-Path $root 'out') $Configuration.ToLowerInvariant()) "V0-$Backend\MmdStudioPoC.exe"
 if(-not(Test-Path -LiteralPath $exe)){throw "Build first: scripts/Invoke-SceneVerification.ps1 -Ui -Configuration $Configuration -Backend $Backend"}
 $artifacts=Join-Path $root "artifacts\performance\$Backend-$($Configuration.ToLowerInvariant())"
 New-Item -ItemType Directory -Path $artifacts -Force | Out-Null

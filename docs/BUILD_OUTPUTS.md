@@ -6,7 +6,10 @@
 EasyDanceStudio/
   out/
     debug/
-      MVP-10-Mono/MmdStudioPoC.exe   (current workspace UI)
+      V0-Mono/MmdStudioPoC.exe        (current workspace UI)
+      R0-02a-Mono/MmdStudioPoC.exe
+      R0-02a-IL2CPP/MmdStudioPoC.exe
+      MVP-10-Mono/MmdStudioPoC.exe
       MVP-10-IL2CPP/MmdStudioPoC.exe
       MVP-08-Mono/MmdStudioPoC.exe
       MVP-08-IL2CPP/MmdStudioPoC.exe
@@ -24,6 +27,9 @@ EasyDanceStudio/
       MVP-02-IL2CPP/MmdStudioPoC.exe
       POC-06C-Mono/...
     release/
+      V0-IL2CPP/MmdStudioPoC.exe     (current release candidate)
+      R0-02a-Mono/MmdStudioPoC.exe
+      R0-02a-IL2CPP/MmdStudioPoC.exe
       MVP-10-Mono/MmdStudioPoC.exe
       MVP-10-IL2CPP/MmdStudioPoC.exe
       MVP-08-Mono/MmdStudioPoC.exe
@@ -76,3 +82,5 @@ MVP-07 (2026-11-19): the UI verification and launcher now use MVP-07-<backend>; 
 MVP-08/09 (2026-11-19): UI verification, the launcher and Invoke-ScenePerformance.ps1 use MVP-08-<backend>. All four Debug/Release × Mono/IL2CPP outputs were built and pass 86 UI + 9 restart assertions and the native inventory (PERFORMANCE_REPORT.md).
 
 MVP-10 (2026-11-19): UI verification, the launcher and Invoke-ScenePerformance.ps1 use MVP-10-<backend>; all four outputs pass 95 UI + 9 restart assertions and the native inventory (TRANSFORM_GIZMO.md).
+
+R0-02a (2026-11-19): UI verification, the launcher and Invoke-ScenePerformance.ps1 use R0-02a-<backend>; all four outputs pass 100 UI + 9 restart assertions (UNRESOLVED_REFERENCES.md).

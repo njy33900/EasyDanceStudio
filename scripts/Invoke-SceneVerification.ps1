@@ -12,7 +12,7 @@ $artifacts=Join-Path $root "artifacts\scene\$Backend"
 $exe=Join-Path $outputRoot "MVP-01-$Backend\MmdStudioPoC.exe"
 if($Ui){
     $artifacts=Join-Path $root "artifacts\scene-ui\$Backend"
-    $exe=Join-Path $outputRoot "MVP-10-$Backend\MmdStudioPoC.exe"
+    $exe=Join-Path $outputRoot "V0-$Backend\MmdStudioPoC.exe"
 }
 if ($Configuration -eq 'Release') { $artifacts = Join-Path $artifacts 'release' }
 New-Item -ItemType Directory -Path $artifacts -Force | Out-Null
@@ -51,7 +51,7 @@ else{$arguments+=@('-pocStagePmx',(Join-Path $stageFixtures 'stage.pmx'),'-scree
 $code=Invoke-Hidden $exe $arguments 300
 $report=Get-Content -LiteralPath $path -Raw|ConvertFrom-Json
 if((Get-Item -LiteralPath $path).LastWriteTimeUtc -lt $started -or $code -ne 0 -or -not $report.success -or
-    $report.backend -ne $Backend -or $report.checks.Count -lt $(if($Ui){95}else{26})){throw "Scene verification failed: $($report.error)"}
+    $report.backend -ne $Backend -or $report.checks.Count -lt $(if($Ui){126}else{26})){throw "Scene verification failed: $($report.error)"}
 if($Ui){
     $report|Select-Object success,backend,@{Name='checks';Expression={$_.checks.Count}},screenshot|Format-List
     # Restart check: a fresh Player process opens the .mmdscene saved by the UI run.

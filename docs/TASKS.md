@@ -1,5 +1,27 @@
 # Tasks
 
+## H1-01 — 단일 PMX/VMD 단계별 로딩 (부분 구현, 2026-11-19)
+
+- UI의 PMX 추가와 VMD 연결/교체를 파일 I/O, UMT 메인 스레드 프레임 분할, 후보 반영 단계로 나눴다. 단계명·취소 요청 카드를 표시하며 안전한 경계에서 취소한다. Release IL2CPP Windows Player UI **124/124**, 재실행 **9/9** 통과; 추가 PMX·대용량 VMD 취소 뒤 기존 장면/모션 보존을 검사했다. `H1_LOADING_STAGE1.md`.
+- **H1-01 반복 취소·재시도 (2026-11-20):** `PocSceneCycleProbe`/`run-scene-cycle.sh`. Release IL2CPP 20회(단계별 취소 → 재열기): 객체 수 매 회 동일, Unity 할당 +1.9 MiB(10회 이후 평탄), 예약 메모리는 할당기 풀로 542→598 MiB.
+- **H1-01 VMD Native 예외 경로 (2026-11-20):** UMT VMD 변환은 Native 컨텍스트를 성공 경로에서만 해제한다. 우리 진행 콜백이 예외를 UMT로 던지지 않게 모두 감쌌다(항상 던지는 콜백으로도 VMD 로드 성공, Release IL2CPP). UMT 내부 예외 대비 `try/finally`는 패키지 내장 결정 필요.
+- **H1-01 후반 실패 정리 (2026-11-20):** UMT 빌드가 중간에 실패하면 컨테이너에 붙은 메시·재질·아바타를 정리한다. Release IL2CPP에서 세 단계 실패 주입 시 남은 객체 0(`run-pmx-staging.sh`의 `lateFailures`).
+- **H1-01c (2026-11-20):** `.mmdscene` 열기를 후보 장면 트랜잭션으로 바꿨다(비동기 준비 → 한 번에 교체, 취소·실패 시 기존 장면 유지). Debug Mono UI 126/126·복원 9/9(2.74초·최악 128ms), Release IL2CPP 126/126·9/9(1.98초·최악 66ms), Release Mono 126/126·9/9(2.04초·최악 68ms). 느린 프레임 단계 계측: 남은 최악 프레임은 이름 정리 한 범주·텍스처 한 장 디코드·장면 교체(모두 원자 작업, 70ms 미만). `H1_LOADING_STAGE1.md`.
+- **H1-01b (2026-11-20):** 텍스처·재질을 항목 단위로 나누고(UMT 포팅, 공개 훅으로 전달) 이름 정리를 비동기화했다. Release IL2CPP Sandrone 최악 프레임 489.6ms → **55.8ms**, 기존 UMT 결과와 3개 모델 동일(Release IL2CPP/Mono, Debug Mono). 텍스처·재질 단계의 실패·취소 자원 정리 포함. 남은 것: 큰 텍스처 1장(~50ms)·이름 정리 한 범주(최대 ~94ms), UMT 후반 단계 부분 자원, VMD Native 예외 경로, 동기 장면 복원 경로, 반복 자원/중급 PC 검증. `H1_LOADING_STAGE1.md`.
+
+## H1-00 — 로딩 분리 조사 (코드 조사 완료, 2026-11-19)
+
+- 고정 UMT 패키지의 PMX/VMD 동기·비동기 경로와 현재 앱 호출 경로를 대조했다. `ReadAsync`/`BuildUnityObjectsAsync`/`ConvertAsync`는 메인 스레드에서 프레임을 나누지만 작업 스레드 파싱이나 즉시 취소를 제공하지 않는다. 파일 I/O만 우선 분리 가능하다.
+- H1-01의 첫 구현은 단계 메시지·프레임 양보·안전한 경계의 취소 요청으로 범위를 정했다. Unity 객체 생성 중 즉시 취소와 완전한 실패 정리에는 패키지의 좁은 패치 또는 프로젝트 소유 단계별 빌더가 필요하다. 근거와 Player 검증 항목은 `H1_LOADING_INVESTIGATION.md`.
+- 이 항목은 코드 조사이며 후속 H1-01 첫 구현/Player 검증은 위 항목에 기록했다. R0-01 실제 입력·100% DPI·실제 배경, R0-03 클린 VM, R0-04 중급 PC는 별도 미완료 게이트다.
+
+## V0 — Full-window viewport and hideable UI (automated checks passed, 2026-11-19)
+
+- Scope: `ENHANCEMENT_SPEC_v0.4.md` V0-01~06 / ADR-016. The 3D camera fills the client area; explorer, inspector, top bar, playback and gizmo mode bar float above it and can be hidden individually or together. H toggles focus view, H/Esc or corner UI button restores; essential dialogs remain visible. Framing fits the unobscured rectangle without moving the camera when cards are toggled.
+- Verification: initial Debug Mono and Release IL2CPP `V0-<backend>` Windows Players each passed 114 UI assertions plus 9 relaunch assertions. After individual hide buttons and collapsed edge tabs, final Release IL2CPP passes **120 UI + 9 relaunch** assertions. Built-in screenshots `scene-ui.png`, `scene-ui-collapsed.png` and `scene-ui-focus.png` inspected; probe changed the window to 1600×900 and back. Details: `V0_VIEWPORT_LAYOUT.md`.
+- Direct launch: rebuilt Release IL2CPP V0 Player opens the new scene UI without `-sceneUi`; actual window, startup log and exit 0 checked. Explicit legacy scene probe still passes 26 assertions.
+- Remaining R0-01 manual gate: physical mouse/keyboard and native dialogs, 100% DPI and multi-monitor checks, plus a third-party stage. The current PC reports 150% system DPI. This automated result is not manual input signoff.
+
 ## POC-00 — Windows Player build baseline (passed, 2026-11-18)
 
 - Goal: build and launch Unity 6000.3.28f1 / URP Windows x64 Player, emit a machine-readable runtime result.
@@ -19,6 +41,13 @@
 - Negative case: locally generated invalid PMX signature produced success=false and process exit 1. No source asset was imported into Assets or embedded in the build.
 - Final command: scripts/Invoke-PocVerification.ps1 -IncludePmx; exit 0. All four cases matched expected outcomes. Evidence: artifacts/poc-build.log, pmx-player.json/.png/.log, pmx-player-invalid.json, poc-verification.json. Windows UMTNativePlugin.dll and copied original license/notices present in out/debug/POC-01.
 - Limit: diagnostic CLI only, not a production file picker or recoverable user workflow. VMD playback, live physics, animated morph/IK, camera VMD, seeking and IL2CPP remain unverified. Stage 0 as a whole is NOT complete.
+
+## R0-02a — Preserve unresolved references (passed, 2026-11-19)
+
+- Defect: MVP-07 dropped entries whose PMX was missing/failed and lost missing VMD paths, so saving removed them from the file.
+- Fix: unresolved entries and missing motions are kept verbatim in document order, marked in the explorer/inspector, rebased only when saved to another folder, removed only by explicit confirmed delete; object IDs are now stable across reloads.
+- Verification: Debug/Release × Mono/IL2CPP (out/<configuration>/R0-02a-<backend>) each pass 100 UI (95 + 5) + 9 restart assertions. Screenshot scene-ui-missing.png inspected.
+- Not included: reconnecting to a new path (H1-02).
 
 ## MVP-10 — Runtime transform gizmo (passed, 2026-11-19)
 
@@ -77,7 +106,7 @@
 
 ## Next tickets
 
-1. First-phase features including the W/E/R gizmo (TRANSFORM_GIZMO.md) are implemented and verified on Debug/Release × Mono/IL2CPP (95 UI + 9 restart assertions), with the MVP-08 light UI (UI_DESIGN.md) and the MVP-09 performance report (PERFORMANCE_REPORT.md) and known issues (KNOWN_ISSUES.md). Remaining before calling the first phase done: manual checks by a person (mouse/keyboard incl. gizmo dragging, native dialogs, a real stage PMX), a clean-VM run with the VC++ runtime packaging decided, and one mid-range PC measurement. Physics remains OFF; track the isolated morph-regression shutdown failure before release.
+1. Enhancement spec v0.4 (ENHANCEMENT_SPEC_v0.4.md) is the plan. R0-02a, V0 automated implementation and H1-00 code investigation are done. H1-01 PMX/VMD UI loading is staged; H1-01b split textures/materials/rename (Sandrone worst frame 489.6 ms → 55.8 ms Release IL2CPP, output identical to UMT). Next for H1-01: late-stage UMT partial resources, VMD native exception path, transactional `.mmdscene` open, repeated cancel/retry resource checks (`H1_LOADING_STAGE1.md`). R0-01 actual mouse/keyboard and 100% DPI, R0-03 clean-VM packaging and R0-04 mid-range PC measurement remain release gates. Physics remains OFF; track the isolated morph-regression shutdown failure before release.
 2. Expand morph/IK validation to direct group morphs, additional chains and another model; generic compatibility remains open.
 3. Test native dependencies on a clean Windows machine and harden asynchronous loading and malformed-input/resource-path validation.
 

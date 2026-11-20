@@ -2,6 +2,10 @@
 
 작업 인계는 루트 [HANDOFF.md](HANDOFF.md)를 먼저 확인하세요. 현재 브랜치, 실행 방법, 검증 결과와 다음 작업을 정리했습니다. 1차 MVP 기능은 구현·자동 검증되었고 수동 확인과 배포 점검이 남았습니다(docs/KNOWN_ISSUES.md, docs/PERFORMANCE_REPORT.md).
 
+후속 품질·그래픽·출력 작업의 확정 요구사항은 [고도화 명세 v0.4](docs/ENHANCEMENT_SPEC_v0.4.md)에, 현재 전체 창 뷰포트 구현·검증 범위는 [V0 기록](docs/V0_VIEWPORT_LAYOUT.md)에 정리했습니다.
+
+**바로 실행:** `out/release/V0-IL2CPP/MmdStudioPoC.exe`를 더블클릭하면 새 장면 화면이 열립니다. 캐릭터 추가 → PMX 선택 → VMD 연결 순서로 외부 파일을 사용합니다. Unity 에디터는 필요하지 않습니다.
+
 Unity 6000.3.28f1 / URP 17.3.0 Windows x64 desktop application, currently at stage 0 feasibility verification.
 
 Snapshot: **v0.1.0-poc**. This is a source checkpoint, not the v1.0 MVP release. Scope, verified behavior and remaining work are recorded in [CHANGELOG.md](CHANGELOG.md). Test models/motions, diagnostic output and built executables are excluded; supply external assets and rebuild locally.

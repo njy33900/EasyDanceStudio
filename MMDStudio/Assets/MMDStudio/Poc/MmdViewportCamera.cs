@@ -57,6 +57,20 @@ namespace MmdStudio.Poc
             Pivot = bounds.center;
             Distance = Mathf.Clamp(radius / Mathf.Sin(Mathf.Min(halfFov, halfHorizontal)) * 1.05f, MinDistance, MaxDistance);
         }
+        // Fits a bounding sphere into the unobscured part of a full-window camera.
+        // The camera's lens stays unchanged; only an explicit frame operation moves the pivot.
+        public void FrameInRect(Bounds bounds, float verticalFov, float screenWidth, float screenHeight, Rect safe)
+        {
+            if (screenWidth <= 0 || screenHeight <= 0 || safe.width <= 0 || safe.height <= 0) return;
+            var radius = Mathf.Max(.05f, bounds.extents.magnitude);
+            var tanHalf = Mathf.Tan(Mathf.Max(1, verticalFov) * .5f * Mathf.Deg2Rad);
+            var halfWidth = Mathf.Atan(tanHalf * safe.width / screenHeight);
+            var halfHeight = Mathf.Atan(tanHalf * safe.height / screenHeight);
+            Distance = Mathf.Clamp(radius / Mathf.Sin(Mathf.Min(halfWidth, halfHeight)) * 1.12f, MinDistance, MaxDistance);
+            var offset = safe.center - new Vector2(screenWidth * .5f, screenHeight * .5f);
+            var worldPerPixel = 2 * Distance * tanHalf / screenHeight;
+            Pivot = bounds.center - Rotation * (Vector3.right * offset.x + Vector3.up * offset.y) * worldPerPixel;
+        }
         public void Apply(Camera camera)
         {
             if (camera == null) return;

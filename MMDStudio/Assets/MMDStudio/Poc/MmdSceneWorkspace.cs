@@ -25,12 +25,13 @@ namespace MmdStudio.Poc
         private Vector3Field position, rotation, scale;
         private Toggle visible, loop;
         private Slider timeline, speed;
-        private VisualElement transformSection, motionSection, materialSection, emptyState;
+        private VisualElement transformSection, motionSection, materialSection, missingSection, emptyState;
+        private Label missingInfo;
         private PanelSettings settings;
         private Font font;
         private GameObject input;
         private VisualElement viewport;
-        private readonly System.Collections.Generic.List<Texture2D> cornerTextures = new System.Collections.Generic.List<Texture2D>();
+        private VisualElement viewportHint;
         private string hoverHint;
         private enum Drag { None, Orbit, Pan, Gizmo }
         private Drag drag;
@@ -81,7 +82,7 @@ namespace MmdStudio.Poc
             Root.style.unityFontDefinition = FontDefinition.FromFont(font);
 
             // ----- Top bar: title + project on the left, file/view icons on the right -----
-            var topbar = Element(Root, "eds-topbar"); topbar.name = "TopBar";
+            topbar = Element(Root, "eds-topbar"); topbar.name = "TopBar";
             Text(topbar, "Easy Dance Studio", "eds-app-title");
             titleLabel = Text(topbar, "", "eds-project-name"); titleLabel.name = "ProjectTitle";
             Element(topbar, "eds-spacer").pickingMode = PickingMode.Ignore;
@@ -92,8 +93,10 @@ namespace MmdStudio.Poc
             var body = Element(Root, "eds-body"); body.pickingMode = PickingMode.Ignore;
 
             // ----- Scene explorer -----
-            var explorer = Element(body, "eds-explorer"); explorer.name = "Explorer";
-            Text(explorer, "장면 탐색기", "eds-panel-title");
+            explorer = Element(body, "eds-explorer"); explorer.name = "Explorer";
+            var explorerHeader = Element(explorer, "eds-card-header");
+            Text(explorerHeader, "장면 탐색기", "eds-panel-title");
+            HideButton(explorerHeader, "HideExplorer", "Explorer");
             var treeRoot = Element(explorer, "eds-tree-root");
             treeRoot.Add(new MmdIcon(MmdIconKind.Chevron, 14, new Color(.63f, .63f, .67f)) { style = { marginRight = 6 } });
             Text(treeRoot, "장면", null);
@@ -111,17 +114,25 @@ namespace MmdStudio.Poc
             emptyState.Add(new MmdIcon(MmdIconKind.Cube, 40, new Color(.55f, .55f, .6f)));
             Text(emptyState, "3D 뷰포트", "eds-empty-title").pickingMode = PickingMode.Ignore;
             Text(emptyState, "캐릭터와 배경을 추가해 배치하고 재생하세요", "eds-empty-sub").pickingMode = PickingMode.Ignore;
-            var hint = Text(viewport, "좌클릭 선택 · 우클릭 회전 · 휠클릭 이동 · 휠 확대 · W/E/R 기즈모 · F 맞춤 · Space 재생 · Delete 삭제", "eds-viewport-hint");
-            hint.name = "ViewportHint"; hint.pickingMode = PickingMode.Ignore;
+            viewportHint = Text(viewport, "좌클릭 선택 · 우클릭 회전 · 휠클릭 이동 · 휠 확대 · W/E/R 기즈모 · F 맞춤 · Space 재생 · Delete 삭제 · H 집중 보기", "eds-viewport-hint");
+            viewportHint.name = "ViewportHint"; viewportHint.pickingMode = PickingMode.Ignore;
             BuildGizmoUi(viewport);
-            AddRoundedCorners(viewport, 12, Color.white);
+            body.Insert(0, viewportWrap); // 3D overlays paint behind the floating cards.
 
             // ----- Inspector: selection header, then stacked sections -----
-            var inspector = Element(body, "eds-inspector"); inspector.name = "Inspector";
+            inspector = Element(body, "eds-inspector"); inspector.name = "Inspector";
+            var inspectorHeader = Element(inspector, "eds-card-header");
+            Text(inspectorHeader, "속성", "eds-panel-title");
+            HideButton(inspectorHeader, "HideInspector", "Inspector");
             var content = new ScrollView { name = "InspectorContent" }; content.style.flexGrow = 1; inspector.Add(content);
-            Text(content, "속성", "eds-panel-title");
             selectionTitle = Text(content, "선택한 항목", "eds-selection-title"); selectionTitle.name = "SelectionTitle";
             info = Text(content, "", "eds-selection-info"); info.name = "SelectionInfo";
+
+            missingSection = Section(content, "MissingSection", "누락된 파일");
+            missingInfo = Text(missingSection, "", "eds-section-text"); missingInfo.name = "MissingInfo";
+            Text(missingSection, "이 항목은 장면 파일에 그대로 보존되며 저장해도 사라지지 않습니다. 파일 재연결은 다음 단계에서 지원합니다.", "eds-note");
+            var missingButtons = Element(missingSection, "eds-row-buttons");
+            TextButton(missingButtons, "MissingRemove", "장면에서 항목 삭제", RequestRemove, "eds-button--block", "eds-button--danger");
 
             transformSection = Section(content, "TransformSection", "변형");
             position = Vector(transformSection, "Position", "위치");
@@ -147,7 +158,7 @@ namespace MmdStudio.Poc
             BuildGraphicsSections(content);
 
             // ----- Playback bar -----
-            var playback = Element(Root, "eds-playback"); playback.name = "PlaybackBar";
+            playback = Element(Root, "eds-playback"); playback.name = "PlaybackBar";
             skipStart = IconButton(playback, "SkipStart", MmdIconKind.SkipStart, "처음으로", () => Guard(() => Scene.Seek(0)));
             play = IconButton(playback, "PlayPause", MmdIconKind.Play, "재생 / 일시정지 (Space)", () => Guard(() => Scene.Playing = !Scene.Playing));
             playIcon = play.Q<MmdIcon>();
@@ -161,17 +172,21 @@ namespace MmdStudio.Poc
             speed = new Slider("속도", .5f, 2) { name = "Speed" }; speed.AddToClassList("eds-speed"); speed.SetValueWithoutNotify(1); options.Add(speed);
             speed.RegisterValueChangedCallback(evt => Guard(() => { Scene.Speed = evt.newValue; MarkDirty(); }));
             speedValue = Text(options, "1.0×", "eds-speed-value");
+            HideButton(playback, "HidePlaybackBar", "PlaybackBar");
 
             // ----- Status bar -----
-            var statusBar = Element(Root, "eds-statusbar"); statusBar.name = "StatusBar";
+            statusBar = Element(Root, "eds-statusbar"); statusBar.name = "StatusBar";
             status = Text(statusBar, "", "eds-status"); status.name = "Status";
             Text(statusBar, "물리 OFF", "eds-chip");
+            HideButton(statusBar, "HideStatusBar", "StatusBar");
 
             var cube = GameObject.Find("Cube"); if (cube != null) cube.SetActive(false);
             CreateHighlight();
+            BuildViewportLayoutControls();
             CreateConfirm();
             CreateDialog();
             Application.wantsToQuit += OnWantsToQuit;
+            Camera.main.rect = new Rect(0, 0, 1, 1);
             View.Apply(Camera.main);
             Refresh();
         }
@@ -213,40 +228,7 @@ namespace MmdStudio.Poc
             field.Query<FloatField>().ForEach(item => item.isDelayed = true);
             return field;
         }
-        // The 3D camera draws a plain rectangle; four small masks in the surrounding colour
-        // round the card's corners. Masks ignore picking, so they never block viewport input.
-        private void AddRoundedCorners(VisualElement card, int radius, Color surround)
-        {
-            for (var corner = 0; corner < 4; corner++)
-            {
-                var size = radius * 4;
-                var texture = new Texture2D(size, size, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp, hideFlags = HideFlags.DontSave };
-                var pixels = new Color32[size * size];
-                for (var y = 0; y < size; y++)
-                    for (var x = 0; x < size; x++)
-                    {
-                        // Distance from the arc centre for this corner (texture origin is bottom-left).
-                        var cx = (corner == 0 || corner == 3) ? size : 0; var cy = (corner == 0 || corner == 1) ? 0 : size;
-                        var d = Mathf.Sqrt((x + .5f - cx) * (x + .5f - cx) + (y + .5f - cy) * (y + .5f - cy));
-                        var alpha = Mathf.Clamp01(d - size + .5f);
-                        pixels[y * size + x] = new Color(surround.r, surround.g, surround.b, alpha);
-                    }
-                texture.SetPixels32(pixels); texture.Apply(false, true); cornerTextures.Add(texture);
-                var mask = new VisualElement { name = "ViewportCorner" + corner, pickingMode = PickingMode.Ignore };
-                mask.style.position = Position.Absolute; mask.style.width = mask.style.height = radius;
-                mask.style.backgroundImage = new StyleBackground(texture);
-                if (corner == 0 || corner == 3) mask.style.left = 0; else mask.style.right = 0;
-                if (corner == 0 || corner == 1) mask.style.top = 0; else mask.style.bottom = 0;
-                card.Add(mask);
-            }
-        }
-        private void UpdateViewport(VisualElement viewport)
-        {
-            // The card's inner area (inside its white border) is the render area.
-            var root = Root.worldBound; var rect = viewport.LocalToWorld(viewport.contentRect);
-            if (root.width > 0 && root.height > 0 && rect.width > 0 && rect.height > 0)
-                Camera.main.rect = new Rect((rect.x-root.x)/root.width, 1-(rect.yMax-root.y)/root.height, rect.width/root.width, rect.height/root.height);
-        }
+        private void UpdateViewport(VisualElement viewport) => Camera.main.rect = new Rect(0, 0, 1, 1);
         public void Select(string id)
         {
             if (!Scene.Objects.Any(item => item.Id == id)) throw new ArgumentException("장면 항목을 찾을 수 없습니다.");
@@ -283,30 +265,61 @@ namespace MmdStudio.Poc
             Busy = true; Error = ""; message = "불러오는 중…";
             var playing = Scene.Playing; Scene.Playing = false; Refresh();
             yield return null;
+            System.Threading.Tasks.Task<MmdSceneService.SceneObject> importTask = null;
+            System.Threading.Tasks.Task motionTask = null;
+            if (kind != PickKind.Motion)
+            {
+                loadCancellation = new System.Threading.CancellationTokenSource();
+                RefreshLoadingCard();
+                var objectKind = kind == PickKind.Stage ? MmdSceneService.ObjectKind.Stage : MmdSceneService.ObjectKind.Character;
+                var position = objectKind == MmdSceneService.ObjectKind.Stage ? Vector3.zero :
+                    new Vector3(Scene.Objects.Count(item => item.Kind == MmdSceneService.ObjectKind.Character) * 1.5f, 0, 0);
+                importTask = Scene.ImportAsync(path, position, objectKind, stage =>
+                {
+                    if (loadCancellation == null || loadCancellation.IsCancellationRequested) return;
+                    message = stage; UpdateStatus(); RefreshLoadingCard();
+                }, loadCancellation.Token);
+                while (!importTask.IsCompleted) yield return null;
+            }
+            else if (Selected != null && Selected.Kind == MmdSceneService.ObjectKind.Character)
+            {
+                loadCancellation = new System.Threading.CancellationTokenSource();
+                RefreshLoadingCard();
+                motionTask = Scene.ReplaceMotionAsync(SelectedId, path, stage =>
+                {
+                    if (loadCancellation == null || loadCancellation.IsCancellationRequested) return;
+                    message = stage; UpdateStatus(); RefreshLoadingCard();
+                }, loadCancellation.Token);
+                while (!motionTask.IsCompleted) yield return null;
+            }
             try
             {
                 if (kind == PickKind.Character)
                 {
-                    var characters = Scene.Objects.Count(item => item.Kind == MmdSceneService.ObjectKind.Character);
-                    var item = Scene.Import(path, null, new Vector3(characters * 1.5f, 0, 0));
+                    var item = importTask.GetAwaiter().GetResult();
                     SelectedId = item.Id; MarkDirty(); message = "캐릭터를 추가했습니다. VMD를 연결하세요."; FrameAll();
                 }
                 else if (kind == PickKind.Stage)
                 {
-                    var item = Scene.ImportStage(path, Vector3.zero);
+                    var item = importTask.GetAwaiter().GetResult();
                     SelectedId = item.Id; MarkDirty(); message = "배경을 추가했습니다. 배경은 모션 없이 고정됩니다."; FrameAll();
                 }
                 else
                 {
                     if (Selected == null) throw new InvalidOperationException("캐릭터를 먼저 선택하세요.");
                     if (Selected.Kind != MmdSceneService.ObjectKind.Character) throw new InvalidOperationException("배경에는 VMD를 연결할 수 없습니다. 캐릭터를 선택하세요.");
-                    Scene.ReplaceMotion(SelectedId, path); MarkDirty(); message = "선택한 캐릭터에 VMD를 연결했습니다.";
+                    motionTask.GetAwaiter().GetResult(); ForgetUnresolvedMotion(SelectedId); MarkDirty(); message = "선택한 캐릭터에 VMD를 연결했습니다.";
                 }
             }
+            catch (OperationCanceledException) { Error = ""; message = "불러오기를 취소했습니다."; }
             // The failure text lives in Error so it disappears with the error instead of
             // lingering in the normal status message after later successful actions.
             catch (Exception ex) { Error = "불러오지 못했습니다: " + ex.Message + " · 기존 장면은 유지됩니다."; message = previousMessage; }
-            finally { Busy = false; Scene.ResumeAfterInterruption(playing); Refresh(); }
+            finally
+            {
+                loadCancellation?.Dispose(); loadCancellation = null;
+                Busy = false; Scene.ResumeAfterInterruption(playing); Refresh(); RefreshLoadingCard();
+            }
         }
         private void ApplyPlacement()
         {
@@ -336,7 +349,7 @@ namespace MmdStudio.Poc
         {
             if (!TryBounds(items, out var bounds)) return;
             var camera = Camera.main;
-            View.Frame(bounds, camera.fieldOfView, camera.aspect); View.Apply(camera);
+            View.FrameInRect(bounds, camera.fieldOfView, Screen.width, Screen.height, SafeViewportRect()); View.Apply(camera);
         }
 
         // Pointer is over an opaque UI panel (the viewport and its hint ignore picking).
@@ -366,14 +379,14 @@ namespace MmdStudio.Poc
         // ignored and a viewport press only commits the field. While the delete dialog is
         // open only Esc is handled (its full-screen overlay also blocks pointer input).
         internal void ProcessViewportInput(Vector2 screen, Vector2 delta, float scrollNotches, bool orbitHeld, bool panHeld, bool frameKey,
-            bool leftHeld = false, bool playKey = false, bool deleteKey = false, bool cancelKey = false, bool saveKey = false, int gizmoKey = 0)
+            bool leftHeld = false, bool playKey = false, bool deleteKey = false, bool cancelKey = false, bool saveKey = false, int gizmoKey = 0, bool focusKey = false)
         {
             var pressed = (orbitHeld && !orbitWasHeld) || (panHeld && !panWasHeld);
             var leftPressed = leftHeld && !leftWasHeld; var leftReleased = !leftHeld && leftWasHeld;
             orbitWasHeld = orbitHeld; panWasHeld = panHeld; leftWasHeld = leftHeld;
             if (!orbitHeld && !panHeld && drag != Drag.Gizmo) drag = Drag.None;
             if (drag == Drag.Gizmo && !leftHeld) { drag = Drag.None; EndGizmoDrag(); }
-            if (Busy || Camera.main == null) { CancelPointerDrag(); return; }
+            if (Camera.main == null) { CancelPointerDrag(); return; }
             if (DialogVisible)
             {
                 CancelPointerDrag();
@@ -386,8 +399,11 @@ namespace MmdStudio.Poc
                 if (cancelKey) CancelRemove();
                 return;
             }
-            var camera = Camera.main;
             var textFocused = TextInputFocused();
+            if (!textFocused && focusKey) { SetFocusView(!FocusView); return; }
+            if (FocusView && cancelKey) { SetFocusView(false); return; }
+            if (Busy) { CancelPointerDrag(); return; }
+            var camera = Camera.main;
             if ((pressed || leftPressed) && drag == Drag.None && PointerInViewport(screen))
             {
                 var focused = Root.panel.focusController.focusedElement as VisualElement;
@@ -414,7 +430,7 @@ namespace MmdStudio.Poc
                 if (scrollNotches != 0 && PointerInViewport(screen)) View.Zoom(scrollNotches);
                 if (frameKey) FrameSelected();
                 if (playKey && Scene.Duration > 0) Guard(() => Scene.Playing = !Scene.Playing);
-                if (deleteKey && Selected != null) RequestRemove();
+                if (deleteKey && (Selected != null || SelectedUnresolved != null)) RequestRemove();
                 if (saveKey) Guard(() => Save());
                 if (gizmoKey >= 1 && gizmoKey <= 3) SetGizmoMode((GizmoMode)(gizmoKey - 1));
             }
@@ -501,7 +517,17 @@ namespace MmdStudio.Poc
         }
         private void RequestRemove()
         {
-            if (Busy || Selected == null) return;
+            if (Busy || (Selected == null && SelectedUnresolved == null)) return;
+            var missing = SelectedUnresolved;
+            if (missing != null)
+            {
+                confirmId = SelectedId;
+                confirmText.text = "누락된 " + (missing.Data.type == SceneObjectData.StageType ? "배경" : "캐릭터") + " '" + Path.GetFileNameWithoutExtension(missing.Data.assetPath) +
+                    "'을(를) 장면에서 삭제할까요?\n저장하면 이 참조가 장면 파일에서 사라집니다. 실행 취소는 아직 지원하지 않습니다.";
+                confirm.style.display = DisplayStyle.Flex; ConfirmVisible = true;
+                Root.Q<Button>("CancelRemove").Focus();
+                return;
+            }
             var item = Selected;
             confirmId = item.Id;
             confirmText.text = (item.Kind == MmdSceneService.ObjectKind.Stage ? "배경" : "캐릭터") + " '" + Path.GetFileNameWithoutExtension(item.ModelSource) +
@@ -522,9 +548,15 @@ namespace MmdStudio.Poc
             (Root.panel?.focusController?.focusedElement as VisualElement)?.Blur();
             Guard(() =>
             {
+                if (RemoveUnresolved(id))
+                {
+                    if (SelectedId == id) SelectedId = Scene.Objects.FirstOrDefault()?.Id;
+                    message = "누락 항목을 장면에서 삭제했습니다.";
+                    return;
+                }
                 var item = Scene.Objects.FirstOrDefault(value => value.Id == id);
                 if (item == null) return;
-                Scene.Remove(id); MarkDirty();
+                Scene.Remove(id); ForgetUnresolvedMotion(id); MarkDirty();
                 if (SelectedId == id) SelectedId = Scene.Objects.FirstOrDefault()?.Id;
                 message = item.Kind == MmdSceneService.ObjectKind.Stage ? "선택한 배경을 삭제했습니다." : "선택한 캐릭터를 삭제했습니다.";
             });
@@ -544,7 +576,8 @@ namespace MmdStudio.Poc
                 right && !shift, mouse.middleButton.isPressed || (right && shift), Pressed(keyboard?.fKey),
                 mouse.leftButton.isPressed, Pressed(keyboard?.spaceKey), Pressed(keyboard?.deleteKey), Pressed(keyboard?.escapeKey),
                 keyboard != null && keyboard.ctrlKey.isPressed && keyboard.sKey.wasPressedThisFrame,
-                keyboard == null || keyboard.ctrlKey.isPressed ? 0 : keyboard.wKey.wasPressedThisFrame ? 1 : keyboard.eKey.wasPressedThisFrame ? 2 : keyboard.rKey.wasPressedThisFrame ? 3 : 0);
+                keyboard == null || keyboard.ctrlKey.isPressed ? 0 : keyboard.wKey.wasPressedThisFrame ? 1 : keyboard.eKey.wasPressedThisFrame ? 2 : keyboard.rKey.wasPressedThisFrame ? 3 : 0,
+                keyboard != null && !keyboard.ctrlKey.isPressed && keyboard.hKey.wasPressedThisFrame);
         }
 
         private void CreateHighlight()
@@ -570,7 +603,7 @@ namespace MmdStudio.Poc
         {
             if (highlight == null) return;
             var selected = Selected;
-            if (selected == null || !selected.Visible || !TryBounds(new[] { selected }, out var bounds)) { highlight.SetActive(false); return; }
+            if (FocusView || selected == null || !selected.Visible || !TryBounds(new[] { selected }, out var bounds)) { highlight.SetActive(false); return; }
             HighlightBounds = bounds; highlight.SetActive(true);
             var min = bounds.min; var max = bounds.max;
             Vector3 P(float x, float y, float z) => new Vector3(x, y, z);
@@ -594,13 +627,24 @@ namespace MmdStudio.Poc
             {
                 var items = Scene.Objects.Where(item => item.Kind == group.Item1).ToArray();
                 Text(list, group.Item2 + " (" + items.Length + ")", "eds-tree-group").name = group.Item3;
+                var missing = UnresolvedOfType(group.Item1 == MmdSceneService.ObjectKind.Stage ? SceneObjectData.StageType : SceneObjectData.CharacterType).ToArray();
+                list.Q<Label>(group.Item3).text = group.Item2 + " (" + (items.Length + missing.Length) + ")";
                 foreach (var item in items)
                 {
                     var id = item.Id;
-                    var label = Path.GetFileNameWithoutExtension(item.ModelSource) + (item.Visible ? "" : " (숨김)");
+                    var label = Path.GetFileNameWithoutExtension(item.ModelSource) + (item.Visible ? "" : " (숨김)") + (UnresolvedMotionOf(id) != null ? " (모션 누락)" : "");
                     var row = ExplorerRow(list, "object-" + id, label, item.Kind == MmdSceneService.ObjectKind.Stage ? MmdIconKind.Stage : MmdIconKind.Character,
                         () => Select(id), Target == InspectorTarget.Object && id == SelectedId);
                     if (!item.Visible) row.AddToClassList("eds-row--hidden");
+                    if (UnresolvedMotionOf(id) != null) row.AddToClassList("eds-row--missing");
+                }
+                foreach (var entry in missing)
+                {
+                    var id = entry.Data.id;
+                    var row = ExplorerRow(list, "unresolved-" + id, Path.GetFileNameWithoutExtension(entry.Data.assetPath) + " (누락)",
+                        group.Item1 == MmdSceneService.ObjectKind.Stage ? MmdIconKind.Stage : MmdIconKind.Character, () => SelectUnresolved(id),
+                        Target == InspectorTarget.Object && id == SelectedId);
+                    row.AddToClassList("eds-row--missing");
                 }
             }
             Text(list, "환경", "eds-tree-group");
@@ -610,8 +654,14 @@ namespace MmdStudio.Poc
             var selected = Selected;
             var isCharacter = selected != null && selected.Kind == MmdSceneService.ObjectKind.Character;
             add.SetEnabled(!Busy); addStage.SetEnabled(!Busy); connect.SetEnabled(!Busy && isCharacter); remove.SetEnabled(!Busy && selected != null);
+            var selectedMissing = Target == InspectorTarget.Object ? SelectedUnresolved : null;
             selectionTitle.text = Target == InspectorTarget.Light ? "조명" : Target == InspectorTarget.Camera ? "카메라" :
+                selectedMissing != null ? (selectedMissing.Data.type == SceneObjectData.StageType ? "누락된 배경" : "누락된 캐릭터") :
                 selected == null ? "선택한 항목" : isCharacter ? "선택한 캐릭터" : "선택한 배경";
+            Show(missingSection, selectedMissing != null);
+            if (selectedMissing != null)
+                missingInfo.text = selectedMissing.Reason + "\n모델: " + selectedMissing.Data.assetPath +
+                    (string.IsNullOrEmpty(selectedMissing.Data.motionPath) ? "" : "\n모션: " + selectedMissing.Data.motionPath);
             position.SetEnabled(!Busy && selected != null); rotation.SetEnabled(!Busy && selected != null); scale.SetEnabled(!Busy && selected != null);
             visible.SetEnabled(!Busy && selected != null);
             Show(transformSection, selected != null); Show(motionSection, isCharacter); Show(materialSection, selected != null);
@@ -622,7 +672,9 @@ namespace MmdStudio.Poc
                 visible.SetValueWithoutNotify(selected.Visible);
                 var motion = !isCharacter ? "배경 · 모션 없음(고정)" : selected.MotionSource == null ? "모션 없음" : Path.GetFileName(selected.MotionSource);
                 info.text = Path.GetFileName(selected.ModelSource) + "\n" + motion;
-                motionInfo.text = selected.MotionSource == null ? "연결된 VMD가 없습니다." : Path.GetFileName(selected.MotionSource) +
+                var missingMotion = UnresolvedMotionOf(selected.Id);
+                motionInfo.text = missingMotion != null ? "VMD 누락: " + missingMotion + "\n다른 VMD를 연결하면 대체됩니다. 연결 전에는 저장해도 경로가 유지됩니다." :
+                    selected.MotionSource == null ? "연결된 VMD가 없습니다." : Path.GetFileName(selected.MotionSource) +
                     (selected.Motion != null ? " · " + selected.Motion.Summary.durationSeconds.ToString("F1") + "초" : "");
                 var summary = selected.Summary;
                 materialInfo.text = "재질 " + summary.materials + "개 · 텍스처 " + summary.loadedTextures + "/" + summary.textureSlots +
@@ -631,6 +683,7 @@ namespace MmdStudio.Poc
             else
             {
                 info.text = Target == InspectorTarget.Light ? "방향광의 색·강도·방향과 그림자" : Target == InspectorTarget.Camera ? "시야각과 저장된 시점" :
+                    selectedMissing != null ? Path.GetFileName(selectedMissing.Data.assetPath) :
                     Scene.Objects.Count == 0 ? "장면이 비어 있습니다." : "탐색기나 뷰포트에서 항목을 선택하세요.";
                 position.SetValueWithoutNotify(Vector3.zero); rotation.SetValueWithoutNotify(Vector3.zero); scale.SetValueWithoutNotify(Vector3.one);
             }
@@ -662,6 +715,7 @@ namespace MmdStudio.Poc
             var error = Error.Length > 0;
             status.text = hoverHint ?? (error ? Error : message);
             status.EnableInClassList("eds-status--error", error && hoverHint == null);
+            RefreshFocusNotice();
         }
         private static string Clock(double seconds)
         {
@@ -680,6 +734,7 @@ namespace MmdStudio.Poc
             if (Scene == null) return;
             UpdateClock();
             if (DeviceInput) ReadDevices();
+            RefreshFocusNotice();
         }
         // The automated probe drives ProcessViewportInput directly and disables device reads.
         internal bool DeviceInput { get; set; } = true;
@@ -692,10 +747,10 @@ namespace MmdStudio.Poc
         }
         private void OnDestroy()
         {
+            loadCancellation?.Cancel();
             if (settings != null) Destroy(settings); if (font != null) Destroy(font); if (input != null) Destroy(input);
             if (highlightMaterial != null) Destroy(highlightMaterial);
             if (pickMesh != null) Destroy(pickMesh);
-            foreach (var texture in cornerTextures) if (texture != null) Destroy(texture);
             Application.wantsToQuit -= OnWantsToQuit;
         }
     }

@@ -19,6 +19,7 @@ namespace MmdStudio.Poc
         private static readonly Color[] AxisColours = { new Color(.9f, .28f, .3f), new Color(.19f, .64f, .42f), new Color(.24f, .39f, .87f) };
         private static readonly Color ActiveColour = new Color(.96f, .65f, .14f);
         private VisualElement gizmoOverlay;
+        private VisualElement gizmoBar;
         private Button gizmoMoveButton, gizmoRotateButton, gizmoScaleButton;
         internal int HoverHandle { get; private set; } = -1;
         internal int DragHandle { get; private set; } = -1;
@@ -33,10 +34,11 @@ namespace MmdStudio.Poc
             gizmoOverlay.style.position = Position.Absolute; gizmoOverlay.style.left = gizmoOverlay.style.right = gizmoOverlay.style.top = gizmoOverlay.style.bottom = 0;
             gizmoOverlay.generateVisualContent += DrawGizmo;
             card.Add(gizmoOverlay);
-            var bar = new VisualElement { name = "GizmoModes" }; bar.AddToClassList("eds-gizmo-bar"); card.Add(bar);
-            gizmoMoveButton = GizmoModeButton(bar, "GizmoMove", "이동", "W", GizmoMode.Move);
-            gizmoRotateButton = GizmoModeButton(bar, "GizmoRotate", "회전", "E", GizmoMode.Rotate);
-            gizmoScaleButton = GizmoModeButton(bar, "GizmoScale", "크기", "R", GizmoMode.Scale);
+            gizmoBar = new VisualElement { name = "GizmoModes" }; gizmoBar.AddToClassList("eds-gizmo-bar"); card.Add(gizmoBar);
+            gizmoMoveButton = GizmoModeButton(gizmoBar, "GizmoMove", "이동", "W", GizmoMode.Move);
+            gizmoRotateButton = GizmoModeButton(gizmoBar, "GizmoRotate", "회전", "E", GizmoMode.Rotate);
+            gizmoScaleButton = GizmoModeButton(gizmoBar, "GizmoScale", "크기", "R", GizmoMode.Scale);
+            HideButton(gizmoBar, "HideGizmoModes", "GizmoModes");
         }
         private Button GizmoModeButton(VisualElement bar, string name, string text, string key, GizmoMode mode)
         {
@@ -63,7 +65,7 @@ namespace MmdStudio.Poc
         }
         // The gizmo exists only for a visible selected object while the inspector shows it.
         internal MmdSceneService.SceneObject GizmoTarget =>
-            Target == InspectorTarget.Object && Selected != null && Selected.Visible ? Selected : null;
+            PanelVisible("GizmoModes") && Target == InspectorTarget.Object && Selected != null && Selected.Visible ? Selected : null;
         internal bool GizmoVisible => GizmoTarget != null && Camera.main != null && GizmoFrame(out _, out _);
 
         // Gizmo origin (world) and the world length that spans GizmoPixels on screen.

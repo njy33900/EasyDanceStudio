@@ -8,7 +8,7 @@ param(
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
 $outputRoot = Join-Path (Join-Path $root 'out') $Configuration.ToLowerInvariant()
-$exe=Join-Path $outputRoot "MVP-10-$Backend\MmdStudioPoC.exe"
+$exe=Join-Path $outputRoot "V0-$Backend\MmdStudioPoC.exe"
 if(-not(Test-Path -LiteralPath $exe)){throw "Build first: scripts/Invoke-SceneVerification.ps1 -Ui -Configuration $Configuration -Backend $Backend"}
 if($Vmd -and -not $Pmx){throw '-Vmd requires -Pmx'}
 $info=[System.Diagnostics.ProcessStartInfo]::new($exe)

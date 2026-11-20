@@ -1,5 +1,20 @@
 # Decisions
 
+## ADR-016 — Enhancement plan decisions (2026-11-19)
+
+Confirmed by the user for `docs/ENHANCEMENT_SPEC_v0.4.md` section 8.
+
+- **V0 layout:** the 3D view fills the whole window; explorer, inspector, top bar and playback bar become floating white cards over it, individually hideable, keeping the light minimal visual language of ADR-015.
+- **Focus view keys:** `H` toggles all control UI; `H` or `Esc` restores it (Esc only when no dialog is open); a small restore button stays in a screen corner. `Tab` is not used (UI focus navigation).
+- **Release candidate:** IL2CPP backend, ZIP distribution with the Visual C++ 2015–2022 runtime DLLs placed app-locally (subject to Microsoft's redistribution terms); an installer is later work.
+- **Undo:** 200-command limit; file loading itself is not recorded.
+- **Autosave:** every 2 minutes while there are unsaved changes, to a separate recovery file; never overwrites the original scene.
+- **Effects budget:** in the reference scene at 1080p Release, DOF/SSAO on may cost up to +50 % frame time versus off, and must keep 30 FPS on a mid-range PC.
+- **Encoder:** Windows Media Foundation H.264 first; FFmpeg only as an alternative after its build/licence/patent terms are settled.
+- **Audio:** WAV required, other formats after Player decoding checks; at speeds other than 1× the pitch changes with speed and the UI says so.
+- **Output defaults:** 1920×1080 at **60 FPS** (30 selectable) — the user chose 60 over the proposed 30; output time and file size roughly double.
+- **Open:** toon look reference images (decide before H2b) and the cancellable boundary for large PMX loads (decide after H1-00).
+
 ## ADR-015 — First-phase UI direction and scope trims (2026-11-19)
 
 - The workspace follows the agreed reference layout with a white, modern, minimal look (top bar with icon actions, scene explorer tree, rounded viewport card, stacked inspector sections, icon playback bar). Styling lives in a USS theme; icons are vector-drawn because no icon font ships with the Player.

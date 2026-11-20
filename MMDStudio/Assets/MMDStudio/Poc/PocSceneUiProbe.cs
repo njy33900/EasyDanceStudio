@@ -17,6 +17,13 @@ namespace MmdStudio.Poc
             public bool success;
             public string error, backend, screenshot;
             public string[] checks;
+            public float pmxLoadSeconds, pmxWorstFrameMs;
+            public float sceneOpenSeconds, sceneOpenWorstFrameMs;
+            public int sceneOpenFrames;
+            public string[] sceneOpenSlowestFrames;
+            public string[] orphanLifetimes;
+            public int pmxLoadFrames;
+            public string[] pmxStageTimings;
         }
         private readonly List<string> checks = new List<string>();
         private void Check(string name, bool passed)
@@ -61,9 +68,61 @@ namespace MmdStudio.Poc
             yield return ui.ApplyPickerResult(aMotion, false);
             try { Check("first_vmd_enables_shared_playback", a.Motion != null && ui.Root.Q<Button>("PlayPause").enabledSelf && ui.Error.Length == 0); }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
-            yield return ui.ApplyPickerResult(PocArguments.Value("-pocSecondPmx"), true);
+            var pmxStart = Time.realtimeSinceStartup;
+            StartCoroutine(ui.ApplyPickerResult(PocArguments.Value("-pocSecondPmx"), true));
+            while (ui.Busy)
+            {
+                yield return null;
+                report.pmxLoadFrames++;
+                report.pmxWorstFrameMs = Mathf.Max(report.pmxWorstFrameMs, Time.unscaledDeltaTime * 1000);
+            }
+            report.pmxLoadSeconds = Time.realtimeSinceStartup - pmxStart;
+            report.pmxStageTimings = ui.Scene.Objects.LastOrDefault()?.Summary.loadStageTimings;
             yield return ui.ApplyPickerResult(bMotion, false);
             var b = ui.Scene.Objects.LastOrDefault();
+            var cancelledImport = StartCoroutine(ui.ApplyPickerResult(PocArguments.Value("-pocSecondPmx"), true));
+            for (var frame = 0; frame < 30 && ui.Root.Q<VisualElement>("LoadingCard").resolvedStyle.display != DisplayStyle.Flex; frame++)
+                yield return null;
+            try
+            {
+                Check("pmx_loading_shows_stage_and_cancel", ui.Busy &&
+                    ui.Root.Q<Label>("LoadingLabel").text.Contains("PMX") &&
+                    ui.Root.Q<Button>("CancelLoading").enabledInHierarchy);
+                Activate(ui.Root, "CancelLoading");
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return cancelledImport;
+            yield return null; // Deferred Unity destruction of any prepared candidate.
+            try
+            {
+                Check("cancelled_pmx_preserves_scene", !ui.Busy && ui.Error.Length == 0 && ui.Scene.Objects.Count == 2 &&
+                    ui.Scene.Objects[0].Id == a.Id && ui.Scene.Objects[1].Id == b.Id && ui.SelectedId == b.Id &&
+                    ui.Root.Q<VisualElement>("LoadingCard").resolvedStyle.display == DisplayStyle.None);
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            ui.Select(a.Id);
+            var priorMotion = a.Motion;
+            var priorMotionSource = a.MotionSource;
+            var cancelledMotion = StartCoroutine(ui.ApplyPickerResult(PocArguments.Value("-pocVmd"), MmdSceneWorkspace.PickKind.Motion));
+            for (var frame = 0; frame < 30 && ui.Root.Q<VisualElement>("LoadingCard").resolvedStyle.display != DisplayStyle.Flex; frame++)
+                yield return null;
+            try
+            {
+                Check("vmd_loading_shows_stage_and_cancel", ui.Busy &&
+                    ui.Root.Q<Label>("LoadingLabel").text.Contains("VMD") &&
+                    ui.Root.Q<Button>("CancelLoading").enabledInHierarchy);
+                Activate(ui.Root, "CancelLoading");
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return cancelledMotion;
+            yield return null;
+            try
+            {
+                Check("cancelled_vmd_keeps_previous_motion", !ui.Busy && ui.Error.Length == 0 &&
+                    ReferenceEquals(a.Motion, priorMotion) && a.MotionSource == priorMotionSource &&
+                    ui.Scene.Objects.Count == 2 && ui.SelectedId == a.Id);
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
             try
             {
                 Check("second_character_and_independent_vmd_visible_in_list", ui.Scene.Objects.Count == 2 && a.MotionSource != b.MotionSource && ui.Root.Q<Button>("object-"+a.Id) != null && ui.Root.Q<Button>("object-"+b.Id) != null);
@@ -97,7 +156,7 @@ namespace MmdStudio.Poc
                 Check("pause_submit_holds_clock", !ui.Scene.Playing && ui.Scene.Seconds == paused);
                 Activate(ui.Root, "Stop"); Check("stop_submit_resets_both", ui.Scene.Seconds == 0 && a.Motion.TimeSeconds == 0 && b.Motion.TimeSeconds == 0);
                 Activate(ui.Root, "FrameAll");
-                Check("viewport_excludes_sidebars", Camera.main.rect.x > .1f && Camera.main.rect.width < .8f && Camera.main.rect.height < .9f);
+                Check("viewport_fills_window", Camera.main.rect == new Rect(0, 0, 1, 1));
                 ViewportChecks(ui, a, b);
             }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
@@ -148,13 +207,121 @@ namespace MmdStudio.Poc
                 Check("stage_selection_highlight_follows_stage", ui.HighlightVisible && Near(ui.HighlightBounds.center, stageBounds.center) && Near(ui.HighlightBounds.size, stageBounds.size));
                 Activate(ui.Root, "object-" + a.Id);
                 var statusText = ui.Root.Q<Label>("Status").text;
-                Check("selection_after_failure_clears_stale_failure_status", ui.Error.Length == 0 && !statusText.Contains("불러오지") && statusText.Contains(Path.GetFileNameWithoutExtension(a.ModelSource)));
+                Check("selection_after_failure_clears_stale_failure_status", ui.Error.Length == 0 && !statusText.Contains("불러오지") &&
+                    ui.Root.Q<Label>("SelectionInfo").text.Contains(Path.GetFileName(a.ModelSource)));
                 Activate(ui.Root, "FrameAll");
                 PickingChecks(ui, a, b, stage);
                 GizmoChecks(ui, a);
                 GraphicsChecks(ui);
             }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+
+            // V0 layout uses the actual UI panel for hit testing; allow layout to settle
+            // between display changes before querying the panel's pick tree.
+            try
+            {
+                Check("floating_ui_starts_visible_over_full_camera", Camera.main.rect == new Rect(0, 0, 1, 1) &&
+                    ui.PanelVisible("TopBar") && ui.PanelVisible("Explorer") && ui.PanelVisible("Inspector") &&
+                    ui.PanelVisible("PlaybackBar") && ui.PanelVisible("StatusBar") && ui.PanelVisible("GizmoModes"));
+                Check("each_floating_card_has_a_hide_button", new[] { "TopBar", "Explorer", "Inspector", "PlaybackBar", "StatusBar", "GizmoModes" }
+                    .All(name => ui.Root.Q<Button>("Hide" + name) != null));
+                Activate(ui.Root, "HidePlaybackBar");
+                Activate(ui.Root, "HideStatusBar");
+                Activate(ui.Root, "HideGizmoModes");
+                var cardsHidden = !ui.PanelVisible("PlaybackBar") && !ui.PanelVisible("StatusBar") && !ui.PanelVisible("GizmoModes");
+                Check("hidden_cards_leave_edge_tabs", cardsHidden && new[] { "PlaybackBar", "StatusBar", "GizmoModes" }
+                    .All(name => ui.Root.Q<Button>("Show" + name).resolvedStyle.display == DisplayStyle.Flex));
+                Activate(ui.Root, "ShowPlaybackBar");
+                Activate(ui.Root, "ShowStatusBar");
+                Activate(ui.Root, "ShowGizmoModes");
+                Check("edge_tabs_restore_individual_cards", ui.PanelVisible("PlaybackBar") && ui.PanelVisible("StatusBar") &&
+                    ui.PanelVisible("GizmoModes"));
+                Activate(ui.Root, "HideStatusBar");
+                Activate(ui.Root, "ViewMenuToggle");
+                Activate(ui.Root, "ToggleStatusBar");
+                Activate(ui.Root, "ViewMenuToggle");
+                Check("view_menu_also_restores_hidden_card", ui.PanelVisible("StatusBar"));
+                Activate(ui.Root, "HideExplorer");
+                ScreenCapture.CaptureScreenshot(Path.Combine(Path.GetDirectoryName(path), "scene-ui-collapsed.png"));
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return new WaitForSecondsRealtime(.25f);
+            try
+            {
+                Check("collapsed_tab_screenshot_created", File.Exists(Path.Combine(Path.GetDirectoryName(path), "scene-ui-collapsed.png")));
+                Check("hidden_explorer_releases_its_pixels_to_3d", !ui.PanelVisible("Explorer") && ui.PointerInViewport(new Vector2(64, Screen.height * .5f)));
+                Check("hidden_explorer_leaves_reopen_tab", ui.Root.Q<Button>("ShowExplorer").resolvedStyle.display == DisplayStyle.Flex);
+                Activate(ui.Root, "ShowExplorer");
+                Activate(ui.Root, "HideTopBar");
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return null;
+            try
+            {
+                Check("hidden_topbar_has_restore_control", !ui.PanelVisible("TopBar") &&
+                    ui.PointerInViewport(new Vector2(Screen.width * .5f, Screen.height - 38)) &&
+                    ui.Root.Q<Button>("RestoreControls").resolvedStyle.display == DisplayStyle.Flex);
+                Activate(ui.Root, "RestoreControls");
+                Check("restore_control_reopens_topbar", ui.PanelVisible("TopBar"));
+                Activate(ui.Root, "HideInspector");
+                Activate(ui.Root, "ViewMenuToggle");
+                Check("inspector_button_hides_individual_card", !ui.PanelVisible("Inspector") &&
+                    ui.Root.Q<Button>("ShowInspector").resolvedStyle.display == DisplayStyle.Flex);
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return null;
+            try
+            {
+                Check("hidden_inspector_releases_its_pixels_to_3d", ui.PointerInViewport(new Vector2(Screen.width - 70, Screen.height * .5f)));
+                Activate(ui.Root, "ToggleInspector");
+                Activate(ui.Root, "ViewMenuToggle");
+                var cameraBeforeFocus = Camera.main.transform.position;
+                Key(ui, focus: true);
+                Check("h_focus_hides_all_control_cards", ui.FocusView && !ui.PanelVisible("TopBar") && !ui.PanelVisible("Explorer") &&
+                    !ui.PanelVisible("Inspector") && !ui.PanelVisible("PlaybackBar") && !ui.PanelVisible("GizmoModes") &&
+                    new[] { "Explorer", "Inspector", "PlaybackBar", "StatusBar", "GizmoModes" }
+                        .All(name => ui.Root.Q<Button>("Show" + name).resolvedStyle.display == DisplayStyle.None) &&
+                    ui.Root.Q<Button>("RestoreControls").resolvedStyle.display == DisplayStyle.Flex &&
+                    !ui.HighlightVisible && !ui.GizmoVisible && Near(Camera.main.transform.position, cameraBeforeFocus));
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return null;
+            try
+            {
+                Check("focus_view_accepts_3d_input_across_window", ui.PointerInViewport(new Vector2(64, Screen.height * .5f)) &&
+                    ui.PointerInViewport(new Vector2(Screen.width - 70, Screen.height * .5f)) &&
+                    ui.PointerInViewport(new Vector2(Screen.width * .5f, Screen.height - 38)));
+                var before = ui.View.Yaw;
+                Frame(ui, new Vector2(Screen.width * .5f, Screen.height * .5f), Vector2.zero, orbit: true);
+                Frame(ui, new Vector2(Screen.width * .5f + 30, Screen.height * .5f), new Vector2(30, 0), orbit: true);
+                Frame(ui, new Vector2(Screen.width * .5f + 30, Screen.height * .5f), Vector2.zero);
+                Check("focus_view_orbit_still_works", !Near(ui.View.Yaw, before));
+                ScreenCapture.CaptureScreenshot(Path.Combine(Path.GetDirectoryName(path), "scene-ui-focus.png"));
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            // ScreenCapture writes after rendering; keep focus view active until the file exists.
+            yield return new WaitForSecondsRealtime(.3f);
+            try
+            {
+                Check("focus_view_screenshot_created", File.Exists(Path.Combine(Path.GetDirectoryName(path), "scene-ui-focus.png")));
+                Key(ui, cancel: true);
+                Check("escape_restores_controls_without_dialog", !ui.FocusView && ui.PanelVisible("TopBar") && ui.PanelVisible("Explorer"));
+                Key(ui, focus: true); Key(ui, focus: true);
+                Check("h_toggles_focus_view_back", !ui.FocusView && ui.PanelVisible("Inspector") && ui.PanelVisible("PlaybackBar"));
+                Screen.SetResolution(1600, 900, false);
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return new WaitForSecondsRealtime(.4f);
+            try
+            {
+                Check("resized_window_keeps_full_camera_and_panel_input", Screen.width == 1600 && Screen.height == 900 &&
+                    Camera.main.rect == new Rect(0, 0, 1, 1) &&
+                    ui.PointerOverUi(new Vector2(64, Screen.height * .5f)) &&
+                    ui.PointerInViewport(new Vector2(Screen.width * .5f, Screen.height * .5f)));
+                Screen.SetResolution(1280, 720, false);
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return new WaitForSecondsRealtime(.4f);
 
             // ----- MVP-07 project save/open/new -----
             var project = Path.Combine(Path.GetDirectoryName(path), "project");
@@ -163,6 +330,7 @@ namespace MmdStudio.Poc
             var sceneFile = Path.Combine(project, "scene.mmdscene");
             var aModel = a.ModelSource; var bModel = b.ModelSource; var stageModel = stage.ModelSource;
             string[] ids = null;
+            SceneObjectData stageEntry = null, firstEntry = null; string[] characterIds = null;
             try
             {
                 Check("unsaved_changes_marked_in_title", ui.Dirty && ui.ProjectPath == null && ui.Root.Q<Label>("ProjectTitle").text.EndsWith(" *"));
@@ -221,6 +389,64 @@ namespace MmdStudio.Poc
                     ui.Scene.Objects.Count == 2 && ui.Scene.Objects.All(item => item.Kind == MmdSceneService.ObjectKind.Character) &&
                     first != null && first.Motion == null && ui.Scene.Objects[1].Motion != null);
                 Activate(ui.Root, "NoticeOk");
+
+                // R0-02a: unresolved entries stay in the document.
+                var missingPath = Path.Combine(project, "missing.mmdscene");
+                var original = MmdSceneDocument.Read(missingPath);
+                stageEntry = original.sceneObjects.First(item => item.type == SceneObjectData.StageType);
+                firstEntry = original.sceneObjects.First(item => item.type == SceneObjectData.CharacterType);
+                characterIds = original.sceneObjects.Where(item => item.type == SceneObjectData.CharacterType).Select(item => item.id).ToArray();
+                var missingRow = ui.Root.Q<Button>("unresolved-" + stageEntry.id);
+                Check("missing_entries_kept_and_marked_with_stable_ids", ui.UnresolvedCount == 1 && ui.UnresolvedMotionCount == 1 &&
+                    missingRow != null && missingRow.text.Contains("(누락)") && ui.Root.Q<Button>("object-" + firstEntry.id).text.Contains("(모션 누락)") &&
+                    ui.Root.Q<Label>("StageGroup").text.Contains("(1)") && ui.Scene.Objects.Select(item => item.Id).SequenceEqual(characterIds));
+                Activate(ui.Root, "object-" + characterIds[1]);
+                ui.Root.Q<Vector3Field>("Position").value = new Vector3(2, 0, 0);
+                ui.SaveTo(missingPath);
+                var saved = MmdSceneDocument.Read(missingPath);
+                var savedStage = saved.sceneObjects.FirstOrDefault(item => item.id == stageEntry.id);
+                Check("save_keeps_unresolved_entries_verbatim", saved.sceneObjects.Select(item => item.id).SequenceEqual(original.sceneObjects.Select(item => item.id)) &&
+                    savedStage != null && JsonUtility.ToJson(savedStage) == JsonUtility.ToJson(stageEntry) &&
+                    saved.sceneObjects.First(item => item.id == firstEntry.id).motionPath == firstEntry.motionPath &&
+                    saved.sceneObjects.First(item => item.id == characterIds[1]).position == new Vector3(2, 0, 0));
+                var movedDirectory = Path.Combine(project, "moved"); Directory.CreateDirectory(movedDirectory);
+                var moved = Path.Combine(movedDirectory, "moved.mmdscene");
+                ui.SaveTo(moved);
+                var relocated = MmdSceneDocument.Read(moved);
+                var movedStage = relocated.sceneObjects.First(item => item.id == stageEntry.id);
+                var movedFirst = relocated.sceneObjects.First(item => item.id == firstEntry.id);
+                Check("save_elsewhere_rebases_unresolved_paths", movedStage.assetPath != stageEntry.assetPath &&
+                    string.Equals(MmdSceneDocument.Resolve(moved, movedStage.assetPath), MmdSceneDocument.Resolve(missingPath, stageEntry.assetPath), StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(MmdSceneDocument.Resolve(moved, movedFirst.motionPath), MmdSceneDocument.Resolve(missingPath, firstEntry.motionPath), StringComparison.OrdinalIgnoreCase));
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return ui.OpenFrom(Path.Combine(project, "missing.mmdscene"));
+            try
+            {
+                var reopened = ui.DialogVisible && ui.LastLoadProblems.Length == 2 && ui.UnresolvedCount == 1 && ui.UnresolvedMotionCount == 1 &&
+                    ui.Scene.Objects.Select(item => item.Id).SequenceEqual(characterIds);
+                Activate(ui.Root, "NoticeOk");
+                Check("reopen_keeps_ids_and_unresolved_entries", reopened);
+                Activate(ui.Root, "unresolved-" + stageEntry.id);
+                var inspected = ui.Root.Q<Label>("SelectionTitle").text == "누락된 배경" && ui.Root.Q("MissingSection").style.display.value != DisplayStyle.None &&
+                    ui.Root.Q<Label>("MissingInfo").text.Contains(stageEntry.assetPath) && !ui.GizmoVisible;
+                if (!inspected) throw new InvalidOperationException("unresolved_entry_inspector");
+                // Visual evidence of an unresolved entry (not an extra assertion).
+                ScreenCapture.CaptureScreenshot(Path.Combine(Path.GetDirectoryName(path), "scene-ui-missing.png"));
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return new WaitForSecondsRealtime(.2f);
+            try
+            {
+                var inspected = true;
+                Activate(ui.Root, "MissingRemove");
+                if (!ui.ConfirmVisible) throw new InvalidOperationException("Unresolved delete did not ask for confirmation");
+                Activate(ui.Root, "ConfirmRemove");
+                var removed = ui.UnresolvedCount == 0 && ui.Dirty && ui.Root.Q<Button>("unresolved-" + stageEntry.id) == null;
+                ui.SaveTo(Path.Combine(project, "missing.mmdscene"));
+                var afterDelete = MmdSceneDocument.Read(Path.Combine(project, "missing.mmdscene"));
+                Check("explicit_delete_removes_only_that_unresolved_entry", inspected && removed && afterDelete.sceneObjects.Count == 2 &&
+                    afterDelete.sceneObjects.All(item => item.id != stageEntry.id) && afterDelete.sceneObjects.First(item => item.id == firstEntry.id).motionPath == firstEntry.motionPath);
             }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
             yield return ui.OpenFrom(sceneFile);
@@ -231,6 +457,68 @@ namespace MmdStudio.Poc
                 if (a == null || b == null || stage == null || ui.DialogVisible) throw new InvalidOperationException("clean reopen failed");
                 ids = ui.Scene.Objects.Select(item => item.Id).ToArray();
                 File.WriteAllText(Path.Combine(project, "corrupt.mmdscene"), "{ not json");
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+
+            // H1-01c: cancel a scene open during its second entry; the running scene must be untouched.
+            yield return null; // let owners released by the previous open finish their deferred Destroy
+            var beforeObjects = ui.Scene.Objects.ToArray(); var beforePath = ui.ProjectPath;
+            var lifetimesBefore = UnityEngine.Object.FindObjectsByType<PocAssetLifetime>(FindObjectsInactive.Include, FindObjectsSortMode.None).Length;
+            // Lifetimes not owned by a scene object (diagnostic for leaked import containers).
+            report.orphanLifetimes = UnityEngine.Object.FindObjectsByType<PocAssetLifetime>(FindObjectsInactive.Include, FindObjectsSortMode.None)
+                .Where(owner => ui.Scene.Objects.All(item => item.Owner != owner))
+                .Select(owner => owner.name + " (parent " + (owner.transform.parent == null ? "none" : owner.transform.parent.name) + ", active " + owner.gameObject.activeInHierarchy + ")").ToArray();
+            ui.StartCoroutine(ui.OpenFrom(sceneFile));
+            var waited = 0f;
+            while (!(ui.Busy && ui.Root.Q<Label>("LoadingLabel").text.Contains("(2/")) && waited < 60) { waited += Time.unscaledDeltaTime; yield return null; }
+            try
+            {
+                if (!ui.Busy || !ui.Root.Q<Button>("CancelLoading").enabledInHierarchy) throw new InvalidOperationException("scene open did not reach its second entry with a cancel button");
+                Activate(ui.Root, "CancelLoading");
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            while (ui.Busy) yield return null;
+            yield return null; // Destroy is deferred to the end of the frame
+            try
+            {
+                var sameObjects = ui.Scene.Objects.SequenceEqual(beforeObjects); var samePath = ui.ProjectPath == beforePath;
+                var lifetimes = UnityEngine.Object.FindObjectsByType<PocAssetLifetime>(FindObjectsInactive.Include, FindObjectsSortMode.None).Length;
+                var statusText = ui.Root.Q<Label>("Status").text; var cardHidden = ui.Root.Q("LoadingCard").style.display.value == DisplayStyle.None;
+                var cancelOk = sameObjects && samePath && ui.Error.Length == 0 && ui.Scene.CandidateCount == 0 && lifetimes == lifetimesBefore &&
+                    statusText.Contains("취소") && cardHidden;
+                Check("scene_open_cancel_keeps_running_scene_and_releases_candidates" + (cancelOk ? "" : " [sameObjects=" + sameObjects + " samePath=" + samePath +
+                    " error='" + ui.Error + "' candidates=" + ui.Scene.CandidateCount + " lifetimes=" + lifetimes + " before=" + lifetimesBefore + " objects=" + ui.Scene.Objects.Count +
+                    " status='" + statusText + "' cardHidden=" + cardHidden + "]"), cancelOk);
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            // Full asynchronous open after the cancel: replaces the scene in one step.
+            ui.StartCoroutine(ui.OpenFrom(sceneFile));
+            var openLog = new List<(float ms, string stage)>();
+            var loadingLabel = ui.Root.Q<Label>("LoadingLabel");
+            var frameStart = Time.realtimeSinceStartup;
+            do
+            {
+                var stageBefore = ui.Busy ? loadingLabel.text : "(idle)";
+                yield return null;
+                var now = Time.realtimeSinceStartup; var ms = (now - frameStart) * 1000; frameStart = now;
+                var stageAfter = ui.Busy ? loadingLabel.text : "(committed)";
+                openLog.Add((ms, stageBefore == stageAfter ? stageAfter : stageBefore + " -> " + stageAfter));
+                report.sceneOpenWorstFrameMs = Mathf.Max(report.sceneOpenWorstFrameMs, ms); report.sceneOpenFrames++;
+            }
+            while (ui.Busy);
+            report.sceneOpenSlowestFrames = openLog.OrderByDescending(entry => entry.ms).Take(8)
+                .Select(entry => entry.ms.ToString("0.0") + " ms: " + entry.stage).ToArray();
+            yield return null; // the replaced scene's owners are destroyed at the end of the frame
+            try
+            {
+                report.sceneOpenSeconds = ui.SceneOpenSeconds;
+                a = Find(ui, MmdSceneService.ObjectKind.Character, aModel); b = Find(ui, MmdSceneService.ObjectKind.Character, bModel);
+                stage = Find(ui, MmdSceneService.ObjectKind.Stage, stageModel);
+                Check("async_scene_open_replaces_scene_in_one_step", a != null && b != null && stage != null && ui.Error.Length == 0 && !ui.DialogVisible &&
+                    ui.Scene.Objects.Select(item => item.Id).SequenceEqual(ids) && ui.Scene.Objects.All(item => !beforeObjects.Contains(item)) &&
+                    ui.Scene.CandidateCount == 0 && a.Motion != null && b.Motion != null && ui.Scene.Duration == duration &&
+                    UnityEngine.Object.FindObjectsByType<PocAssetLifetime>(FindObjectsInactive.Include, FindObjectsSortMode.None).Length == lifetimesBefore &&
+                    a.Model.root.GetComponentsInChildren<Renderer>().All(renderer => renderer.enabled));
             }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
             yield return ui.OpenFrom(Path.Combine(project, "corrupt.mmdscene"));
@@ -320,6 +608,17 @@ namespace MmdStudio.Poc
         private static bool Near(float x, float y, float tolerance = 1e-3f) => Math.Abs(x - y) <= tolerance;
         private static bool CameraMatchesView(MmdSceneWorkspace ui) =>
             Near(Camera.main.transform.position, ui.View.Position) && Quaternion.Angle(Camera.main.transform.rotation, ui.View.Rotation) < .01f;
+        private static bool BoundsInside(Bounds bounds, Rect area)
+        {
+            foreach (var x in new[] { bounds.min.x, bounds.max.x })
+                foreach (var y in new[] { bounds.min.y, bounds.max.y })
+                    foreach (var z in new[] { bounds.min.z, bounds.max.z })
+                    {
+                        var point = Camera.main.WorldToScreenPoint(new Vector3(x, y, z));
+                        if (point.z <= 0 || !area.Contains(new Vector2(point.x, point.y))) return false;
+                    }
+            return true;
+        }
         private static void Frame(MmdSceneWorkspace ui, Vector2 screen, Vector2 delta, float wheel = 0, bool orbit = false, bool pan = false, bool frameKey = false, bool left = false) =>
             ui.ProcessViewportInput(screen, delta, wheel, orbit, pan, frameKey, left);
         private static void Click(MmdSceneWorkspace ui, Vector2 screen)
@@ -327,8 +626,8 @@ namespace MmdStudio.Poc
             Frame(ui, screen, Vector2.zero, left: true);
             Frame(ui, screen, Vector2.zero);
         }
-        private static void Key(MmdSceneWorkspace ui, bool play = false, bool delete = false, bool cancel = false, bool save = false, int gizmo = 0) =>
-            ui.ProcessViewportInput(new Vector2(-10, -10), Vector2.zero, 0, false, false, false, false, play, delete, cancel, save, gizmo);
+        private static void Key(MmdSceneWorkspace ui, bool play = false, bool delete = false, bool cancel = false, bool save = false, int gizmo = 0, bool focus = false) =>
+            ui.ProcessViewportInput(new Vector2(-10, -10), Vector2.zero, 0, false, false, false, false, play, delete, cancel, save, gizmo, focus);
         // Left-button drag through the given screen points (press at the first, release at the last).
         private static void LeftDrag(MmdSceneWorkspace ui, params Vector2[] points)
         {
@@ -536,7 +835,7 @@ namespace MmdStudio.Poc
             Activate(ui.Root, "ResetView");
             MmdSceneWorkspace.TryBounds(ui.Scene.Objects.Where(item => item.Visible), out var all);
             Check("view_reset_restores_default_angle_and_frames_all", Near(view.Yaw, MmdViewportCamera.DefaultYaw) && Near(view.Pitch, MmdViewportCamera.DefaultPitch) &&
-                Near(view.Pivot, all.center) && CameraMatchesView(ui));
+                ui.SafeViewportRect().Contains((Vector2)camera.WorldToScreenPoint(all.center)) && CameraMatchesView(ui));
 
             // Presentation defaults for the screenshots: default light/background, Bloom and tonemapping on.
             ui.ApplyGraphics(new SceneGraphicsSettings { bloomEnabled = true, tonemapping = true });
@@ -576,7 +875,7 @@ namespace MmdStudio.Poc
             Click(ui, floor.Value);
             Check("viewport_click_on_floor_selects_stage", ui.SelectedId == stage.Id && ui.Root.Q<Label>("SelectionTitle").text == "선택한 배경");
 
-            var sidebar = new Vector2(rect.xMin * .5f, rect.center.y);
+            var sidebar = new Vector2(64, rect.center.y);
             Click(ui, sidebar);
             Check("left_click_over_panel_does_not_pick", ui.SelectedId == stage.Id);
 
@@ -627,16 +926,17 @@ namespace MmdStudio.Poc
             // Inside the camera rect 3 px below the toolbar. With an inverted Y conversion this
             // would map into the bottom playback/status panels and be reported as UI.
             var topEdge = new Vector2(rect.center.x, rect.yMax - 3);
-            var sidebar = new Vector2(rect.xMin * .5f, rect.center.y);
-            var toolbar = new Vector2(rect.center.x, Screen.height - 4);
+            var sidebar = new Vector2(64, rect.center.y);
+            var toolbar = new Vector2(rect.center.x, Screen.height - 38);
             Check("viewport_pick_distinguishes_panels_and_viewport",
                 ui.PointerOverUi(sidebar) && ui.PointerOverUi(toolbar) && !ui.PointerOverUi(centre) && !ui.PointerOverUi(topEdge) &&
                 ui.PointerInViewport(centre) && !ui.PointerInViewport(sidebar));
 
             MmdSceneWorkspace.TryBounds(ui.Scene.Objects.Where(item => item.Visible), out var all);
             Check("frame_all_targets_visible_bounds_and_applies_camera",
-                Near(view.Pivot, all.center) && view.Distance > all.extents.magnitude && CameraMatchesView(ui) &&
-                Vector3.Angle(Camera.main.transform.forward, all.center - Camera.main.transform.position) < .1f);
+                view.Distance > all.extents.magnitude && CameraMatchesView(ui) &&
+                ui.SafeViewportRect().Contains((Vector2)Camera.main.WorldToScreenPoint(all.center)));
+            Check("frame_all_fits_visible_bounds_between_cards", BoundsInside(all, ui.SafeViewportRect()));
 
             var yaw = view.Yaw; var pitch = view.Pitch; var distance = view.Distance; var pivot = view.Pivot;
             Frame(ui, centre, Vector2.zero, orbit: true);                 // press
@@ -688,7 +988,8 @@ namespace MmdStudio.Poc
             Check("list_selection_moves_3d_highlight", ui.HighlightVisible && Near(ui.HighlightBounds.center, bBounds.center) && Near(ui.HighlightBounds.size, bBounds.size));
             var pitchBeforeKey = view.Pitch;
             Frame(ui, centre, Vector2.zero, frameKey: true);
-            Check("frame_shortcut_frames_selected_character", Near(view.Pivot, bBounds.center) && Near(view.Pitch, pitchBeforeKey) && CameraMatchesView(ui));
+            Check("frame_shortcut_frames_selected_character", ui.SafeViewportRect().Contains((Vector2)Camera.main.WorldToScreenPoint(bBounds.center)) &&
+                Near(view.Pitch, pitchBeforeKey) && CameraMatchesView(ui));
             ui.Root.Q<Toggle>("Visible").value = false;
             Check("hidden_selected_character_hides_highlight", !ui.HighlightVisible);
             ui.Root.Q<Toggle>("Visible").value = true;

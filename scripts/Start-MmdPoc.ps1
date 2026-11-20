@@ -27,7 +27,7 @@ New-Item -ItemType Directory -Path $previewRoot -Force | Out-Null
 $info = [System.Diagnostics.ProcessStartInfo]::new($exe)
 $info.UseShellExecute = $false
 $info.WorkingDirectory = $root
-$arguments = @('-screen-fullscreen', '0', '-screen-width', '1280', '-screen-height', '720',
+$arguments = @('-legacyWorkspace', '-screen-fullscreen', '0', '-screen-width', '1280', '-screen-height', '720',
     '-pocMotionMode', $MotionMode, '-logFile', (Join-Path $previewRoot 'poc-preview.log'))
 if (-not $EmptyWorkspace) { $arguments += @('-pocPmx', $pmx, '-pocVmd', (Get-Item -LiteralPath $Vmd).FullName) }
 if ($CameraVmd) {

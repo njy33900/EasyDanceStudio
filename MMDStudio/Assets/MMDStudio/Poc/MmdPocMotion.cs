@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using UMT;
 using UnityEngine;
 using UnityEngine.Playables;
@@ -134,7 +136,52 @@ namespace MmdStudio.Poc
         internal bool OwnsPhysics(object owner) => ReferenceEquals(physicsOwner, owner);
         internal void ReleasePhysics(object owner) { if (OwnsPhysics(owner)) physicsOwner = null; }
 
-        public void Load(PMXImportResult imported, string path, string mode = "sparse")
+        public void Load(PMXImportResult imported, string path, string mode = "sparse") =>
+            LoadPrepared(imported, path, mode, null, null, 0);
+
+        public async Task LoadAsync(PMXImportResult imported, string path, string mode,
+            Action<string> stage, CancellationToken cancellationToken)
+        {
+            var file = new FileInfo(Path.GetFullPath(path));
+            if (!file.Exists || !string.Equals(file.Extension, ".vmd", StringComparison.OrdinalIgnoreCase) ||
+                file.Length < 50 || file.Length > 32L * 1024 * 1024)
+                throw new InvalidDataException("VMD is missing, too small, or exceeds the 32 MiB probe limit.");
+            ReportSafely(stage, "VMD 파일 읽는 중…");
+            var bytes = await Task.Run(() => File.ReadAllBytes(file.FullName), cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            ReportSafely(stage, "VMD 구조 분석 중…");
+            VMDAnimation animation = await VMDReader.ReadAsync(new UMTFrameBudget(8), Task.FromResult(bytes));
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                ReportSafely(stage, "VMD 곡선 변환 중…");
+                var watch = System.Diagnostics.Stopwatch.StartNew();
+                var prepared = await VMDAnimationClipConverter.ConvertAsync(new UMTFrameBudget(8), animation,
+                    imported.model, null, new VMDAnimationClipOptions
+                    {
+                        frameRate = 30, bakeIKToFK = mode == "baked-reference", bakePhysicsToFK = false
+                    }, (phase, frame, total) => ReportSafely(stage, "VMD " + phase + " 변환 중…"));
+                watch.Stop();
+                cancellationToken.ThrowIfCancellationRequested();
+                ReportSafely(stage, "VMD 연결 중…");
+                var owned = animation; animation = null; // LoadPrepared destroys it on success or failure.
+                LoadPrepared(imported, path, mode, owned, prepared, watch.Elapsed.TotalMilliseconds);
+            }
+            finally { if (animation != null) Destroy(animation); }
+        }
+
+        // UMT's VMD conversion creates native solver/physics contexts and a Persistent index
+        // resolver and frees them only on its success path (no try/finally in the pinned
+        // package). An exception thrown out of our progress callback would therefore leak them,
+        // so progress reporting must never throw back into UMT.
+        internal static void ReportSafely(Action<string> stage, string label)
+        {
+            try { stage?.Invoke(label); }
+            catch (Exception ex) { Debug.LogWarning("Loading progress callback failed (ignored): " + ex.Message); }
+        }
+
+        private void LoadPrepared(PMXImportResult imported, string path, string mode,
+            VMDAnimation preparedAnimation, VMDModelClipData preparedClip, double preparedConversionMs)
         {
             if (sceneOwner != null) throw new InvalidOperationException("Use the scene service to replace this motion");
             ClipRevision++;
@@ -154,7 +201,8 @@ namespace MmdStudio.Poc
             VMDAnimation animation = null;
             try
             {
-                using (var stream = File.OpenRead(file.FullName)) animation = VMDReader.Read(stream);
+                if (preparedAnimation != null) animation = preparedAnimation;
+                else using (var stream = File.OpenRead(file.FullName)) animation = VMDReader.Read(stream);
                 uint lastFrame = 0;
                 var sourceBones = new HashSet<string>(StringComparer.Ordinal);
                 var sourceMorphs = new HashSet<string>(StringComparer.Ordinal);
@@ -209,7 +257,7 @@ namespace MmdStudio.Poc
                 };
                 Summary.unityAllocatedBytesBeforeConversion = UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong();
                 var conversionWatch = System.Diagnostics.Stopwatch.StartNew();
-                clip = VMDAnimationClipConverter.Convert(animation, model.model, new VMDAnimationClipOptions
+                clip = preparedClip ?? VMDAnimationClipConverter.Convert(animation, model.model, new VMDAnimationClipOptions
                 {
                     frameRate = 30,
                     bakeIKToFK = bakedReference,
@@ -217,7 +265,7 @@ namespace MmdStudio.Poc
                 });
                 if (mode == "direct" || mode == "direct-default-ik") directTracks = new MmdDirectBoneTracks(animation, model);
                 conversionWatch.Stop();
-                Summary.conversionMilliseconds = conversionWatch.Elapsed.TotalMilliseconds;
+                Summary.conversionMilliseconds = preparedClip == null ? conversionWatch.Elapsed.TotalMilliseconds : preparedConversionMs;
                 Summary.unityAllocatedBytesAfterConversion = UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong();
 #if ENABLE_IL2CPP
                 Summary.processPeakWorkingSetStatus = "Unavailable: IL2CPP does not support process data.";

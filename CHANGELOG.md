@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Added a repeated cancel/retry scene-open probe (`scripts/bash/run-scene-cycle.sh`): 20 Release IL2CPP cycles keep object counts identical and Unity allocated memory within +1.9 MiB.
+- Loading progress callbacks can no longer abort PMX/VMD loading: an exception thrown from one is logged as a warning, so it cannot interrupt UMT's VMD conversion before it frees its native solver contexts.
+- When UMT fails part way through building a model, the meshes, materials and avatar it already created are now destroyed instead of leaking; a fault-injection check in the PMX staging probe verifies nothing is left after failures in three late stages.
+- Opening a `.mmdscene` no longer clears the current scene first: entries are prepared asynchronously as hidden candidates with a cancel button, and the scene is replaced in one step only when all are ready; cancel or failure keeps the running scene. Debug Mono, Release IL2CPP and Release Mono pass 126 UI and 9 restart assertions (Release worst frame during open about 66–68 ms).
+
+- Split PMX texture, material and rename work across frames (H1-01b): textures and materials are prepared one per frame by a project-side port of the UMT logic and handed to UMT through its public hooks, with cancel checks and cleanup between items; rename lists are cached and renaming uses UMT's async API. Release IL2CPP Sandrone worst frame 489.6 ms → 55.8 ms; a Player probe confirms identical textures, materials, renderers and warnings to the original import for three models.
+
+- Started H1-01 staged UI loading for PMX and VMD, with a visible stage/cancel card and safe-boundary cancellation. Release IL2CPP Player passes 124 UI and 9 restart checks including cancelled PMX/VMD preserving the previous scene. One Sandrone import still has a 490 ms worst frame in UMT texture/material phases; scene-file loading and complete mid-build resource cleanup remain open.
+- Added a hide button to each floating card, including the status bar. Hidden cards leave a small edge tab for direct reopening; the View menu remains available. Focus view hides the tabs and keeps only its corner UI restore control.
+- Changed the workspace to a full-window 3D viewport with floating white cards. The View menu hides individual cards; H toggles focus view and H/Esc or the corner UI button restores controls. Selection highlight and gizmo disappear in focus view; framing targets the visible safe area. Debug Mono and Release IL2CPP V0 builds pass 114 UI and 9 restart checks. Manual input and 100% DPI checks remain.
+- The current V0 Player now opens the scene workspace when double-clicked. Legacy single-model preview and diagnostic probes use explicit flags; a direct Release IL2CPP launch opened the new UI and exited cleanly, while the legacy scene probe still passed 26 checks.
+
+- Fixed data loss when opening scenes with missing files: unresolved models and missing motion paths are now kept in the document, marked in the explorer and inspector, written back unchanged on save (rebased when saved elsewhere) and removed only by explicit delete. Object IDs are stable across reloads. All four builds pass 100 UI and 9 restart assertions (out/<configuration>/R0-02a-<backend>).
+
 - Added a runtime transform gizmo: W/E/R move/rotate/scale in world axes with a viewport mode bar, constant screen size, hover highlight and two-way inspector sync. Builds go to MVP-10-<backend>; all four Debug/Release × Mono/IL2CPP builds pass 95 UI and 9 restart assertions; Release performance re-measured at 568–646 FPS average.
 
 - Redesigned the workspace to a light, minimal layout: top-bar icon actions, scene explorer tree with light and camera entries, rounded viewport card with empty state, stacked inspector sections, icon playback bar and status hints; USS theme and vector icons. Drag and drop is out of first-phase scope. Builds go to MVP-08-<backend>; all four Debug/Release × Mono/IL2CPP builds pass 86 UI and 9 restart assertions.

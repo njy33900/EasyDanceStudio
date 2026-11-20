@@ -12,6 +12,7 @@ namespace MmdStudio.Poc
         public void Track(PMXImportResult result)
         {
             if (result == null) return;
+            if (result.model != null) resources.Add(result.model);
             foreach (var mesh in result.meshes) resources.Add(mesh.mesh);
             foreach (var material in result.materials) resources.Add(material);
             foreach (var texture in result.textures) resources.Add(texture);
