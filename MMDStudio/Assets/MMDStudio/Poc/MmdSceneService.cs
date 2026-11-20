@@ -35,10 +35,19 @@ namespace MmdStudio.Poc
             public float PhysicsProgress => Bake == null || BakeStale ? 0 : Bake.Progress;
             public bool PhysicsReady => Bake != null && !BakeStale && Bake.Complete;
             public string PhysicsError { get; internal set; }
+            // Ticks where a visible physics bone jumped more than 0.3 m (instability warning).
+            public int PhysicsJumpTicks => Bake == null || BakeStale ? 0 : Bake.JumpTicks;
+            public float PhysicsFirstJumpSeconds => Bake == null ? -1 : Bake.FirstJumpSeconds;
+            // PH-04: per-part strength (0..1), kept across re-bakes; parts present in the model.
+            internal readonly Dictionary<string, float> PhysicsStrength = new Dictionary<string, float>();
+            public string[] PhysicsParts => Bake == null ? new string[0] : Bake.Parts;
+            public float StrengthOf(string part) => PhysicsStrength.TryGetValue(part, out var value) ? value : 1;
         }
         private readonly List<SceneObject> objects = new List<SceneObject>();
         // Per-frame physics bake budget (ms). One character is baked per frame, round-robin.
+        // Paused, the bake may use more of the frame (the UI stays around 30 FPS).
         public double PhysicsBudgetMilliseconds { get; set; } = 8;
+        public double PausedPhysicsBudgetMilliseconds { get; set; } = 24;
         private int bakeCursor;
         private int settleThroughFrame = -1;
         private bool skipNextAdvance;
@@ -356,8 +365,23 @@ namespace MmdStudio.Poc
         {
             item.Bake = null; item.BakeStale = false; item.PhysicsError = null;
             if (item.Motion == null) return;
-            try { item.Bake = new MmdPhysicsBake(item.Motion, item.Model, this); }
+            try
+            {
+                item.Bake = new MmdPhysicsBake(item.Motion, item.Model, this);
+                foreach (var entry in item.PhysicsStrength) item.Bake.SetStrength(entry.Key, entry.Value);
+            }
             catch (Exception ex) { item.PhysicsEnabled = false; item.PhysicsError = ex.Message; Debug.LogWarning("Physics disabled: " + ex.Message); }
+        }
+
+        // PH-04: strength of one physics part for a character (0..1). Instant, no re-bake.
+        public void SetPhysicsStrength(string id, string part, float strength)
+        {
+            if (Array.IndexOf(MmdPhysicsParts.Order, part) < 0) throw new ArgumentOutOfRangeException(nameof(part));
+            if (float.IsNaN(strength) || strength < 0 || strength > 1) throw new ArgumentOutOfRangeException(nameof(strength), "강도는 0~100% 범위여야 합니다.");
+            var item = Find(id);
+            item.PhysicsStrength[part] = strength;
+            item.Bake?.SetStrength(part, strength);
+            Seek(Seconds);
         }
 
         internal bool PhysicsBaking
@@ -378,7 +402,7 @@ namespace MmdStudio.Poc
                 try
                 {
                     if (item.BakeStale) { item.Bake.Restart(); item.BakeStale = false; }
-                    item.Bake.Step(PhysicsBudgetMilliseconds);
+                    item.Bake.Step(Playing ? PhysicsBudgetMilliseconds : PausedPhysicsBudgetMilliseconds);
                 }
                 catch (Exception ex)
                 {

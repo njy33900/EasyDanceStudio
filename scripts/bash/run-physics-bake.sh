@@ -19,6 +19,8 @@ p=sys.argv[1]; r=json.load(open(p,encoding='utf-8'))
 print('fresh',os.path.getmtime(p)>=int(sys.argv[2]),'success',r['success'],r['backend'],r['configuration'],'budget %.0f ms/frame' % r['budgetMs'])
 print(r['error'][:1500])
 for m in r['models'] or []:
-  print('%s: %d ticks checked at %d checkpoints | max error %.7f m (control without state restore %.4f m) | cached bones %d, full length %d ticks = %.1f MB' % (m['name'].encode('ascii','replace').decode(), m['ticks'], m['checkpoints'], m['maxErrorM'], m['controlMaxErrorM'], m['cachedBones'], m['totalTicks'], m['fullLengthBytes']/1048576))
-  print('   bake %.1f s wall over %d frames, %.0f ticks/s, full-length estimate %.1f s, worst frame %.1f ms, longest step %.1f ms, mid-tick %s, beyond-range rejected %s' % (m['bakeWallSeconds'], m['bakeFrames'], m['bakeTicksPerSecond'], m['fullLengthEstimateSeconds'], m['worstFrameMs'], m['longestStepMs'], m['midTickApplies'], m['beyondBakedRejected']))
+  print('%s: %d ticks checked at %d checkpoints | max error %.7f m (control without state restore %.4f m) | cached bones %d, full length %d ticks = %.1f MB (compressed)' % (m['name'].encode('ascii','replace').decode(), m['ticks'], m['checkpoints'], m['maxErrorM'], m['controlMaxErrorM'], m['cachedBones'], m['totalTicks'], m['fullLengthBytes']/1048576))
+  print('   budget %.0f ms: bake %.1f s wall over %d frames, %.0f ticks/s, worst frame %.1f ms, longest step %.1f ms, mid-tick %s, beyond-range rejected %s' % (m['budgetMs'], m['bakeWallSeconds'], m['bakeFrames'], m['bakeTicksPerSecond'], m['worstFrameMs'], m['longestStepMs'], m['midTickApplies'], m['beyondBakedRejected']))
+  for v in m.get('variants') or []: print('   ', v.encode('ascii','replace').decode())
+  print('   weighted bones %d, position tracks kept %d, jump ticks %d (first %.2fs, worst %.3f m %s)' % (m['weightedBones'], m['positionTracks'], m['jumpTicks'], m['firstJumpSeconds'], m['worstJumpM'], m['worstJumpBone']))
 " "$A/physics-bake.json" "$START"

@@ -23,7 +23,7 @@ namespace MmdStudio.Poc
             public string[] sceneOpenSlowestFrames;
             public string[] orphanLifetimes;
             public int physicsBakeFrames;
-            public float physicsPoseDifferenceM;
+            public float physicsPoseDifferenceM, physicsStrengthZeroDifferenceM;
             public int pmxLoadFrames;
             public string[] pmxStageTimings;
         }
@@ -548,6 +548,16 @@ namespace MmdStudio.Poc
                 report.physicsPoseDifferenceM = offPose.Zip(onPose, (x, y) => Vector3.Distance(x, y)).Max();
                 Check("physics_bake_completes_changes_pose_and_repeats", a.PhysicsReady && ui.Root.Q<Label>("PhysicsInfo").text.Contains("준비 완료") &&
                     report.physicsPoseDifferenceM > 1e-3f && onPose.Zip(again, (x, y) => Vector3.Distance(x, y)).Max() == 0);
+                // PH-04: every part at 0 % shows the physics-OFF pose; back at 100 % the baked pose.
+                ui.RefreshPhysicsInfo();
+                var parts = a.PhysicsParts;
+                foreach (var part in parts) ui.Root.Q<Slider>("PhysicsStrength-" + part).value = 0;
+                ui.Scene.Seek(2); var zero = a.Motion.PosePositions();
+                foreach (var part in parts) ui.Root.Q<Slider>("PhysicsStrength-" + part).value = 100;
+                ui.Scene.Seek(2); var full = a.Motion.PosePositions();
+                report.physicsStrengthZeroDifferenceM = offPose.Zip(zero, (x, y) => Vector3.Distance(x, y)).Max();
+                Check("physics_part_strength_blends_without_rebake", parts.Length > 0 && a.PhysicsReady && report.physicsStrengthZeroDifferenceM < 1e-3f &&
+                    onPose.Zip(full, (x, y) => Vector3.Distance(x, y)).Max() == 0);
                 ui.Scene.SetPlacement(a.Id, a.Placement.localPosition + new Vector3(.1f, 0, 0), a.Placement.localEulerAngles, a.Placement.localScale);
                 if (a.PhysicsReady) throw new InvalidOperationException("placement change did not invalidate the physics bake");
             }

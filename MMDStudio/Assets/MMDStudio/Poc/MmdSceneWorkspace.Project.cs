@@ -153,6 +153,8 @@ namespace MmdStudio.Poc
                     assetPath = MmdSceneDocument.ToStored(sceneFile, item.ModelSource), motionPath = motion,
                     position = item.Placement.localPosition, rotationEuler = item.Placement.localEulerAngles, scale = item.Placement.localScale,
                     visible = item.Visible, physics = item.PhysicsEnabled,
+                    physicsParts = item.PhysicsStrength.Count == 0 ? null : item.PhysicsStrength.Keys.ToArray(),
+                    physicsStrength = item.PhysicsStrength.Count == 0 ? null : item.PhysicsStrength.Values.ToArray(),
                 };
             }
             SceneObjectData Missing(UnresolvedItem item)
@@ -286,9 +288,13 @@ namespace MmdStudio.Poc
                     // PH-03: re-enable experimental physics (the bake restarts from zero).
                     foreach (var data in file.sceneObjects)
                     {
-                        if (!data.physics) continue;
                         var live = Scene.Objects.FirstOrDefault(item => item.Id == data.id);
-                        if (live != null && live.Motion != null) Scene.SetPhysics(live.Id, true);
+                        if (live == null) continue;
+                        if (data.physicsParts != null && data.physicsStrength != null)
+                            for (var p = 0; p < Math.Min(data.physicsParts.Length, data.physicsStrength.Length); p++)
+                                if (Array.IndexOf(MmdPhysicsParts.Order, data.physicsParts[p]) >= 0)
+                                    Scene.SetPhysicsStrength(live.Id, data.physicsParts[p], Mathf.Clamp01(data.physicsStrength[p]));
+                        if (data.physics && live.Motion != null) Scene.SetPhysics(live.Id, true);
                     }
                     Graphics.Apply(file.graphics);
                     View.Set(file.view.pivot, file.view.yaw, file.view.pitch, file.view.distance); View.Apply(Camera.main);

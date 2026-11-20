@@ -32,8 +32,10 @@ namespace UMT
         }
 
         // PH-03: the ordinary physics-OFF sample (SolveTransforms) rewrites the shared bone solver
-        // state, which also holds the physical bones' simulation history. A bake interleaved with
-        // on-screen sampling saves the state after each step and restores it before the next.
+        // state array. Without restoring it, the first bake tick after each interleaved sample is
+        // wrong for bones that depend on that state (Gene: 91 of 1,201 ticks, up to 8.8 m, one per
+        // bake-slice boundary; the next tick recovers from the Bullet state). A bake therefore saves
+        // the state after each step and restores it before the next.
         private MMDBoneTransform.BoneSolverState[] savedState;
         public void SaveState()
         {

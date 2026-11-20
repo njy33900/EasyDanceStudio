@@ -25,6 +25,8 @@ namespace MmdStudio.Poc
         private Vector3Field position, rotation, scale;
         private Toggle visible, loop, physics;
         private Label physicsInfo;
+        private VisualElement physicsParts;
+        private string physicsPartsKey;
         private Slider timeline, speed;
         private VisualElement transformSection, motionSection, materialSection, missingSection, emptyState;
         private Label missingInfo;
@@ -155,6 +157,8 @@ namespace MmdStudio.Poc
             physics = new Toggle("물리 (실험)") { name = "Physics" }; motionSection.Add(physics);
             physics.RegisterValueChangedCallback(evt => Guard(() => { if (Selected != null) { Scene.SetPhysics(SelectedId, evt.newValue); MarkDirty(); RefreshPhysicsInfo(); } }));
             physicsInfo = Text(motionSection, "", "eds-note"); physicsInfo.name = "PhysicsInfo";
+            // PH-04: per-part strength sliders for the parts the selected model has.
+            physicsParts = new VisualElement { name = "PhysicsParts" }; motionSection.Add(physicsParts);
 
             materialSection = Section(content, "MaterialSection", "재질");
             materialInfo = Text(materialSection, "", "eds-section-text"); materialInfo.name = "MaterialInfo";
@@ -758,9 +762,29 @@ namespace MmdStudio.Poc
                 selected.PhysicsError != null ? "물리를 끈 이유: " + selected.PhysicsError :
                 !available ? "VMD를 연결하면 물리를 켤 수 있습니다." :
                 !selected.PhysicsEnabled ? "머리카락·옷·신체 등 모델의 모든 강체를 미리 계산해 재생합니다." :
-                selected.PhysicsReady ? "물리 준비 완료 · 어느 시간으로 이동해도 같은 결과" :
-                "물리 준비 중 " + (selected.PhysicsProgress * 100).ToString("0") + "% · 준비된 구간까지 물리로 재생";
+                (selected.PhysicsReady ? "물리 준비 완료 · 어느 시간으로 이동해도 같은 결과" :
+                "물리 준비 중 " + (selected.PhysicsProgress * 100).ToString("0") + "% · 준비된 구간까지 물리로 재생" +
+                (Scene.Playing ? "" : " (일시정지 중 빠르게 계산)")) +
+                (selected.PhysicsJumpTicks > 0 ? "\n주의: 물리가 불안정한 구간이 있습니다(" + selected.PhysicsJumpTicks + "틱, 처음 " +
+                    selected.PhysicsFirstJumpSeconds.ToString("0.0") + "초). 머리카락·옷이 튈 수 있습니다." : "");
             if (text != lastPhysicsText) { physicsInfo.text = text; Show(physicsInfo, text.Length > 0); lastPhysicsText = text; }
+            var parts = selected != null && selected.PhysicsEnabled ? selected.PhysicsParts : new string[0];
+            var key = (selected?.Id ?? "") + "|" + string.Join(",", parts);
+            if (key != physicsPartsKey)
+            {
+                physicsPartsKey = key;
+                physicsParts.Clear();
+                foreach (var part in parts)
+                {
+                    var id = selected.Id; var name = part;
+                    var slider = new Slider(MmdPhysicsParts.Labels[part] + " 물리", 0, 100) { name = "PhysicsStrength-" + part, showInputField = true };
+                    slider.SetValueWithoutNotify(selected.StrengthOf(part) * 100);
+                    slider.RegisterValueChangedCallback(evt => Guard(() => { Scene.SetPhysicsStrength(id, name, Mathf.Round(evt.newValue) / 100f); MarkDirty(); }));
+                    physicsParts.Add(slider);
+                }
+                Show(physicsParts, parts.Length > 0);
+            }
+            physicsParts.SetEnabled(!Busy);
         }
         // The automated probe drives ProcessViewportInput directly and disables device reads.
         internal bool DeviceInput { get; set; } = true;

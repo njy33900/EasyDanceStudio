@@ -38,6 +38,9 @@ namespace MmdStudio.Poc
         public bool visible = true;
         // PH-03 (optional, default false): experimental physics for this character.
         public bool physics;
+        // PH-04 (optional): per-part physics strength (0..1), parallel arrays.
+        public string[] physicsParts;
+        public float[] physicsStrength;
     }
 
     [Serializable]

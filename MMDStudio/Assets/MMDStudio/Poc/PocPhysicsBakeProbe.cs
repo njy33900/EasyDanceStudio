@@ -29,6 +29,11 @@ namespace MmdStudio.Poc
             public float worstFrameMs, longestStepMs;
             public int bakeFrames;
             public bool midTickApplies, beyondBakedRejected;
+            public float budgetMs, firstJumpSeconds, worstJumpM;
+            public int jumpTicks, weightedBones, positionTracks;
+            public string worstJumpBone;
+            // Negative-control investigation: per variant, max error and where it occurs.
+            public string[] variants;
         }
         [Serializable] private sealed class Report
         {
@@ -57,11 +62,13 @@ namespace MmdStudio.Poc
             };
             var results = new List<ModelResult>();
             var vmd = PocArguments.Value("-pocVmd");
-            var inputs = new[] { (PocArguments.Value("-pocPmx"), 1200, true), (PocArguments.Value("-pocSecondPmx"), 600, false) };
+            // Both models are baked for the whole motion: Gene with the playing budget (8 ms),
+            // Sandrone with the paused budget (24 ms) used by the scene while not playing.
+            var inputs = new[] { (PocArguments.Value("-pocPmx"), 1200, 8f), (PocArguments.Value("-pocSecondPmx"), 600, 24f) };
             yield return null;
-            foreach (var (pmx, ticks, fullLength) in inputs)
+            foreach (var (pmx, ticks, budget) in inputs)
             {
-                var result = new ModelResult { name = Path.GetFileNameWithoutExtension(pmx), ticks = ticks };
+                var result = new ModelResult { name = Path.GetFileNameWithoutExtension(pmx), ticks = ticks, budgetMs = budget };
                 results.Add(result);
                 var load = MmdPocProbe.LoadAsync(pmx, null, CancellationToken.None);
                 while (!load.IsCompleted) yield return null;
@@ -73,7 +80,9 @@ namespace MmdStudio.Poc
                 if (motionLoad.IsFaulted) { Release(model); Finish(reportPath, report, results, "VMD load failed: " + motionLoad.Exception.GetBaseException()); yield break; }
                 motion.Playing = false;
 
-                var checkpoints = new[] { 0, 1, 60, ticks / 4, ticks / 2, ticks - 1, ticks }.Distinct().OrderBy(t => t).ToArray();
+                // Every tick is compared: a one-tick error right after a bake slice boundary (whose
+                // position depends on frame timing) must not hide between sparse checkpoints.
+                var checkpoints = Enumerable.Range(0, ticks + 1).ToArray();
                 var reference = new Dictionary<int, Vector3[]>();
                 string error = null;
                 // Reference: uninterrupted stateful simulation.
@@ -96,29 +105,38 @@ namespace MmdStudio.Poc
                 if (error != null) { Release(model); Finish(reportPath, report, results, error); yield break; }
                 yield return null;
 
-                // Interleaved bake, then the negative control without state restore.
-                foreach (var control in new[] { false, true })
+                // Interleaved bake, then controls: without state
+                // restore (twice, for run-to-run determinism) and without restore or interleaving.
+                var variantLog = new List<string>();
+                foreach (var (variantName, control, interleave, skipJump) in new[]
+                {
+                    ("main", false, true, false), ("no-restore", true, true, false), ("no-restore-again", true, true, false),
+                    ("no-restore-no-interleave", true, false, false), ("no-restore-no-world-reads", true, true, true), ("restore-no-world-reads", false, true, true),
+                })
                 {
                     var token = new object();
                     MmdPhysicsBake bake = null;
                     try
                     {
                         motion.AcquireSceneClock(token);
-                        bake = new MmdPhysicsBake(motion, model, token) { SkipStateRestoreForTest = control };
+                        bake = new MmdPhysicsBake(motion, model, token) { SkipStateRestoreForTest = control, SkipJumpCheckForTest = skipJump };
                     }
                     catch (Exception ex) { error = "bake setup: " + ex; }
                     if (error != null) break;
-                    var target = control ? ticks + 1 : (fullLength ? bake.TotalTicks : ticks + 1);
+                    var target = variantName == "main" ? bake.TotalTicks : ticks + 1;
                     var wall = Stopwatch.StartNew(); var frames = 0; var worst = 0f; var frameStart = Time.realtimeSinceStartup;
                     while (bake.BakedTicks < target && error == null)
                     {
                         try
                         {
-                            bake.Step(BudgetMs);
+                            bake.Step(variantName == "main" ? budget : BudgetMs);
                             // What the scene does after each slice: re-sample the displayed time.
-                            var shown = (frames * 0.37f) % motion.Summary.durationSeconds;
-                            motion.SampleFromSceneClock(token, shown);
-                            bake.Apply(shown);
+                            if (interleave)
+                            {
+                                var shown = (frames * 0.37f) % motion.Summary.durationSeconds;
+                                motion.SampleFromSceneClock(token, shown);
+                                bake.Apply(shown);
+                            }
                         }
                         catch (Exception ex) { error = "bake step: " + ex; }
                         frames++;
@@ -129,15 +147,21 @@ namespace MmdStudio.Poc
                     var bakedTicks = Math.Min(bake.BakedTicks, target);
                     try
                     {
-                        var maxError = 0f;
+                        var maxError = 0f; var errors = new List<(float err, int tick, string bone)>();
                         foreach (var tick in checkpoints)
                         {
                             motion.SampleFromSceneClock(token, tick / (float)MmdPhysicsBake.Rate);
                             if (!bake.Apply(tick / (float)MmdPhysicsBake.Rate)) throw new InvalidOperationException("baked tick " + tick + " not applied");
-                            maxError = Mathf.Max(maxError, MaxError(World(model), reference[tick]));
+                            var pose = World(model); var at = 0; var err = 0f;
+                            for (var i = 0; i < pose.Length; i++) { var d = Vector3.Distance(pose[i], reference[tick][i]); if (d > err) { err = d; at = i; } }
+                            maxError = Mathf.Max(maxError, err);
+                            errors.Add((err, tick, model.bones[at].name));
                         }
-                        if (control) result.controlMaxErrorM = maxError;
-                        else
+                        var bad = errors.Where(e => e.err > .01f).ToList();
+                        variantLog.Add(variantName + ": max " + maxError.ToString("0.0000") + " m, ticks over 1 cm " + bad.Count + "/" + errors.Count +
+                            (bad.Count > 0 ? " | worst " + string.Join(", ", bad.OrderByDescending(e => e.err).Take(4).Select(e => "t" + e.tick + " " + e.err.ToString("0.000") + " m @" + e.bone)) : ""));
+                        if (control) result.controlMaxErrorM = Mathf.Max(result.controlMaxErrorM, maxError);
+                        if (variantName == "main")
                         {
                             result.maxErrorM = maxError; result.checkpoints = checkpoints.Length;
                             result.cachedBones = bake.CachedBoneCount; result.totalTicks = bake.TotalTicks; result.fullLengthBytes = bake.Bytes;
@@ -148,6 +172,9 @@ namespace MmdStudio.Poc
                             motion.SampleFromSceneClock(token, 0);
                             result.midTickApplies = bake.Apply(10.5f / MmdPhysicsBake.Rate);
                             result.beyondBakedRejected = bake.Complete || !bake.Apply((bake.BakedTicks + 5) / (float)MmdPhysicsBake.Rate);
+                            result.jumpTicks = bake.JumpTicks; result.firstJumpSeconds = bake.FirstJumpSeconds;
+                            result.worstJumpM = bake.WorstJumpMeters; result.worstJumpBone = bake.WorstJumpBone;
+                            result.weightedBones = bake.WeightedBoneCount; result.positionTracks = bake.PositionTrackCount;
                         }
                     }
                     catch (Exception ex) { error = "verify: " + ex; }
@@ -155,6 +182,7 @@ namespace MmdStudio.Poc
                     if (error != null) break;
                     yield return null;
                 }
+                result.variants = variantLog.ToArray();
                 Release(model);
                 if (error != null) { Finish(reportPath, report, results, error); yield break; }
                 yield return null; yield return null;
@@ -162,7 +190,8 @@ namespace MmdStudio.Poc
             string failure = null;
             foreach (var r in results)
             {
-                if (r.maxErrorM > 1e-4f) failure = r.name + ": bake differs from the uninterrupted simulation by " + r.maxErrorM + " m";
+                // Compressed cache (int16 rotations, float16 position offsets), every tick: 5 mm.
+                if (r.maxErrorM > 5e-3f) failure = r.name + ": bake differs from the uninterrupted simulation by " + r.maxErrorM + " m";
                 else if (!r.midTickApplies || !r.beyondBakedRejected) failure = r.name + ": cache range handling failed";
             }
             Finish(reportPath, report, results, failure);

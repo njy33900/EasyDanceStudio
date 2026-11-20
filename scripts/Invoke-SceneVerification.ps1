@@ -51,7 +51,7 @@ else{$arguments+=@('-pocStagePmx',(Join-Path $stageFixtures 'stage.pmx'),'-scree
 $code=Invoke-Hidden $exe $arguments 300
 $report=Get-Content -LiteralPath $path -Raw|ConvertFrom-Json
 if((Get-Item -LiteralPath $path).LastWriteTimeUtc -lt $started -or $code -ne 0 -or -not $report.success -or
-    $report.backend -ne $Backend -or $report.checks.Count -lt $(if($Ui){130}else{26})){throw "Scene verification failed: $($report.error)"}
+    $report.backend -ne $Backend -or $report.checks.Count -lt $(if($Ui){131}else{26})){throw "Scene verification failed: $($report.error)"}
 if($Ui){
     $report|Select-Object success,backend,@{Name='checks';Expression={$_.checks.Count}},screenshot|Format-List
     # Restart check: a fresh Player process opens the .mmdscene saved by the UI run.
