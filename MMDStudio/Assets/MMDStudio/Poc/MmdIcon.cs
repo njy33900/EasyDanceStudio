@@ -3,7 +3,7 @@ using UnityEngine.UIElements;
 
 namespace MmdStudio.Poc
 {
-    public enum MmdIconKind { NewFile, Open, Save, SaveAs, Frame, SkipStart, Play, Pause, Stop, Cube, Character, Stage, Light, Camera, Chevron, Plus, Undo, Redo }
+    public enum MmdIconKind { NewFile, Open, Save, SaveAs, Frame, SkipStart, Play, Pause, Stop, Cube, Character, Stage, Light, Camera, Chevron, Plus, Undo, Redo, Recent }
 
     // Line icons drawn with UI Toolkit's vector API (no icon font is available in the Player).
     // Geometry uses a 24-unit grid scaled to the element size.
@@ -118,6 +118,9 @@ namespace MmdStudio.Poc
                     Line(P(15, 6), P(19, 10), P(15, 14)); Line(P(19, 10), P(10, 10));
                     p.BeginPath(); p.Arc(P(10, 15), 5 * s, Angle.Degrees(270), Angle.Degrees(90), ArcDirection.CounterClockwise); p.Stroke();
                     Line(P(10, 20), P(15, 20));
+                    break;
+                case MmdIconKind.Recent:
+                    Circle(12, 12, 8.5f); Line(P(12, 7.5f), P(12, 12), P(15.5f, 14));
                     break;
             }
         }

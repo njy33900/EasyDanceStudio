@@ -125,7 +125,7 @@ namespace MmdStudio.Poc
 
         private IEnumerator RestoreRecovery(RecoveryInfo info)
         {
-            yield return LoadScene(RecoveryScenePath);
+            yield return LoadScene(RecoveryScenePath, remember: false);
             if (Error.Length > 0 || ProjectPath == null) { message = "복구하지 못했습니다. 자동 저장 파일은 남겨 두었습니다."; Refresh(); yield break; }
             // The recovered scene belongs to its original file (or none); it is not saved yet.
             ProjectPath = string.IsNullOrEmpty(info.originalPath) ? null : info.originalPath;

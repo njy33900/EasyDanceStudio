@@ -217,6 +217,7 @@ namespace MmdStudio.Poc
             Camera.main.rect = new Rect(0, 0, 1, 1);
             View.Apply(Camera.main);
             Refresh();
+            ConfigureRecent();
             ConfigureRecovery();
         }
 

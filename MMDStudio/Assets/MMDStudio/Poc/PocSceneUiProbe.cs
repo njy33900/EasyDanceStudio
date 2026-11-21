@@ -484,6 +484,57 @@ namespace MmdStudio.Poc
             }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
 
+            // H1-07: recent scenes — newest first, missing files marked and removable, list persisted
+            // as paths only, capped at 10, and a row reopens its scene.
+            var recentFile = Path.Combine(Path.GetDirectoryName(path), "recent.json");
+            bool recentOk = false;
+            try
+            {
+                bool Same(string x, string y) => string.Equals(Path.GetFullPath(x), Path.GetFullPath(y), StringComparison.OrdinalIgnoreCase);
+                var tracked = ui.RecentScenes.Count > 0 && Same(ui.RecentScenes[0], sceneFile) &&
+                    ui.RecentScenes.Any(item => Same(item, Path.Combine(project, "missing.mmdscene"))) &&
+                    ui.RecentScenes.Select(item => Path.GetFullPath(item).ToLowerInvariant()).Distinct().Count() == ui.RecentScenes.Count;
+                if (File.Exists(recentFile)) File.Delete(recentFile);
+                ui.RecentFilePath = recentFile;
+                for (var i = 0; i < 12; i++) ui.RememberRecent(Path.Combine(project, "fake-" + i + ".mmdscene"));
+                var capped = ui.RecentScenes.Count == 10 && ui.RecentScenes[0].EndsWith("fake-11.mmdscene");
+                ui.ForgetMissingRecent();
+                var ghost = Path.Combine(project, "ghost.mmdscene");
+                ui.RememberRecent(ghost); ui.RememberRecent(sceneFile);
+                var stored = File.ReadAllText(recentFile);
+                var pathsOnly = stored.Contains("scene.mmdscene") && !stored.Contains("sceneObjects");
+                Activate(ui.Root, "RecentScenes");
+                var open0 = ui.Root.Q<Button>("RecentOpen0"); var open1 = ui.Root.Q<Button>("RecentOpen1");
+                var shown = ui.DialogVisible && open0 != null && open0.text.StartsWith("scene.mmdscene") && open0.enabledSelf &&
+                    open1 != null && open1.text.Contains("(파일 없음)") && !open1.enabledSelf && ui.Root.Q<Button>("RecentForgetMissing").enabledSelf;
+                Activate(ui.Root, "RecentRemove1");
+                var removed = ui.DialogVisible && ui.RecentScenes.Count == 1 && ui.Root.Q<Button>("RecentOpen1") == null;
+                ui.LoadRecent();
+                var persisted = ui.RecentScenes.Count == 1 && Same(ui.RecentScenes[0], sceneFile);
+                ui.ProcessViewportInput(new Vector2(-10, -10), Vector2.zero, 0, false, false, false, cancelKey: true);
+                var closed = !ui.DialogVisible;
+                ui.RememberRecent(ghost); ui.RememberRecent(sceneFile);
+                Activate(ui.Root, "RecentScenes");
+                Activate(ui.Root, "RecentForgetMissing");
+                var tidied = ui.RecentScenes.Count == 1 && ui.DialogVisible && !ui.Root.Q<Button>("RecentForgetMissing").enabledSelf;
+                recentOk = tracked && capped && pathsOnly && shown && removed && persisted && closed && tidied;
+                if (!recentOk) throw new InvalidOperationException("recent scenes: tracked=" + tracked + " capped=" + capped + " pathsOnly=" + pathsOnly +
+                    " shown=" + shown + " removed=" + removed + " persisted=" + persisted + " closed=" + closed + " tidied=" + tidied);
+                Activate(ui.Root, "RecentOpen0");
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return null;
+            while (ui.Busy) yield return null;
+            try
+            {
+                a = Find(ui, MmdSceneService.ObjectKind.Character, aModel); b = Find(ui, MmdSceneService.ObjectKind.Character, bModel);
+                stage = Find(ui, MmdSceneService.ObjectKind.Stage, stageModel);
+                Check("recent_scenes_listed_marked_removed_and_reopened", recentOk && !ui.DialogVisible && ui.Error.Length == 0 &&
+                    string.Equals(ui.ProjectPath, Path.GetFullPath(sceneFile), StringComparison.OrdinalIgnoreCase) &&
+                    ui.Scene.Objects.Select(item => item.Id).SequenceEqual(ids) && a != null && b != null && stage != null);
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+
             // H1-01c: cancel a scene open during its second entry; the running scene must be untouched.
             yield return null; // let owners released by the previous open finish their deferred Destroy
             var beforeObjects = ui.Scene.Objects.ToArray(); var beforePath = ui.ProjectPath;

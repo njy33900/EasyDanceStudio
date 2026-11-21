@@ -100,6 +100,7 @@ namespace MmdStudio.Poc
                 if (path == null) { message = "파일 선택을 취소했습니다."; Refresh(); return; }
                 StartCoroutine(LoadScene(path));
             }));
+            IconButton(toolbar, "RecentScenes", MmdIconKind.Recent, "최근 장면", ShowRecent);
             IconButton(toolbar, "SaveScene", MmdIconKind.Save, "저장 (Ctrl+S)", () => Guard(() => Save()));
             IconButton(toolbar, "SaveSceneAs", MmdIconKind.SaveAs, "다른 이름으로 저장", () => Guard(() => SaveAs()));
             undoButton = IconButton(toolbar, "Undo", MmdIconKind.Undo, "실행 취소 (Ctrl+Z)", () => Guard(Undo));
@@ -139,7 +140,7 @@ namespace MmdStudio.Poc
                 throw new InvalidOperationException("저장하지 못했습니다(읽기 전용·권한·디스크 문제일 수 있습니다): " + Path.GetFileName(full) + " · 원래 파일은 그대로입니다. 다른 이름으로 저장해 보세요.", ex);
             }
             RebaseUnresolved(full);
-            ProjectPath = full; MarkSaved(); Error = "";
+            ProjectPath = full; MarkSaved(); Error = ""; RememberRecent(full);
             message = "저장했습니다: " + Path.GetFileName(full);
             Refresh();
             return true;
@@ -219,7 +220,7 @@ namespace MmdStudio.Poc
         // entry has been prepared is the current scene replaced in one step. Cancel (loading card)
         // or an unexpected failure discards the candidates and keeps the current scene, its file
         // path and selection. Missing or failing assets become unresolved entries (R0-02a).
-        private IEnumerator LoadScene(string path)
+        private IEnumerator LoadScene(string path, bool remember = true)
         {
             if (Busy) yield break;
             var previousMessage = message;
@@ -326,6 +327,7 @@ namespace MmdStudio.Poc
                     message = "장면을 불러왔습니다: " + Path.GetFileName(path) +
                         (migratedFrom > 0 ? " · 이전 형식(schema " + migratedFrom + ") 파일입니다. 저장하면 새 형식으로 기록되며, 그 전까지 원본은 바뀌지 않습니다." : "");
                     LastOpenMigratedFrom = migratedFrom;
+                    if (remember) RememberRecent(full);
                     LastLoadProblems = problems.ToArray();
                     if (problems.Count > 0)
                         ShowDialog("일부 항목을 불러오지 못했습니다. 나머지 장면은 열렸습니다.\n" + string.Join("\n", problems.Take(8)) +
@@ -375,12 +377,14 @@ namespace MmdStudio.Poc
             dialog = Element(Root, "eds-overlay"); dialog.name = "ProjectDialog";
             var box = Element(dialog, "eds-dialog");
             dialogText = Text(box, "", "eds-dialog-text"); dialogText.name = "ProjectDialogText";
+            dialogContent = Element(box, "eds-dialog-content"); dialogContent.name = "ProjectDialogContent";
             dialogButtons = Element(box, "eds-dialog-buttons");
             dialog.style.display = DisplayStyle.None;
         }
         private void ShowDialog(string text, Action cancel, params (string name, string label, Action action)[] buttons)
         {
             dialogText.text = text; dialogButtons.Clear(); dialogCancel = cancel;
+            dialogContent.Clear(); dialogContent.style.display = DisplayStyle.None;
             for (var i = 0; i < buttons.Length; i++)
             {
                 var (name, label, action) = buttons[i]; var act = action;
