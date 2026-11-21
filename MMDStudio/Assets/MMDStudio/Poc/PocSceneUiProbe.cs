@@ -75,6 +75,7 @@ namespace MmdStudio.Poc
             public void SetGizmo(int key) => Log.Add("gizmo " + key);
         }
         private readonly List<string> checks = new List<string>();
+        private string reportDirectory;
         private void Check(string name, bool passed)
         { if (!passed) throw new InvalidOperationException(name); checks.Add(name); }
         private static void Activate(VisualElement root, string name)
@@ -93,6 +94,7 @@ namespace MmdStudio.Poc
             report.backend = "Mono";
 #endif
             Directory.CreateDirectory(Path.GetDirectoryName(path));
+            reportDirectory = Path.GetDirectoryName(path);
             var aMotion = Path.Combine(Path.GetDirectoryName(path), "first.vmd");
             var bMotion = Path.Combine(Path.GetDirectoryName(path), "second.vmd");
             var invalid = Path.Combine(Path.GetDirectoryName(path), "invalid.pmx");
@@ -1434,6 +1436,95 @@ namespace MmdStudio.Poc
             public DisposableCamera(MmdPocCamera value) { Value = value; }
             public void Dispose() => Value?.Dispose();
         }
+        // ----- H2a-05 look presets -----
+        private static void SaveRendered(Camera camera, string file)
+        {
+            const int width = 960, height = 540;
+            var texture = RenderTexture.GetTemporary(width, height, 24);
+            var previousTarget = camera.targetTexture; var previousRect = camera.rect; var previousActive = RenderTexture.active;
+            var pixels = new Texture2D(width, height, TextureFormat.RGB24, false);
+            try
+            {
+                camera.targetTexture = texture; camera.rect = new Rect(0, 0, 1, 1);
+                camera.Render();
+                RenderTexture.active = texture;
+                pixels.ReadPixels(new Rect(0, 0, width, height), 0, 0); pixels.Apply();
+                File.WriteAllBytes(file, pixels.EncodeToPNG());
+            }
+            finally
+            {
+                RenderTexture.active = previousActive; camera.targetTexture = previousTarget; camera.rect = previousRect;
+                RenderTexture.ReleaseTemporary(texture); Destroy(pixels);
+            }
+        }
+        private void LookChecks(MmdSceneWorkspace ui, string reportDirectory)
+        {
+            var graphics = ui.Graphics; var camera = Camera.main;
+            var dropdown = ui.Root.Q<DropdownField>("LookPreset");
+            var state = ui.Root.Q<Label>("LookState");
+            var bright = MmdLookPresets.BuiltIn[0];
+            var before = JsonUtility.ToJson(graphics.Settings);
+            var fov = camera.fieldOfView; var quality = graphics.Settings.effectQuality;
+            var listed = MmdLookPresets.BuiltIn.Length >= 3 && MmdLookPresets.BuiltIn.All(p => dropdown.choices.Contains(p.name));
+            dropdown.value = bright.name;
+            var applied = MmdLookPresets.SameLook(bright.values, graphics.Settings) && graphics.Settings.lookPreset == bright.name &&
+                state.text.Contains("적용됨") && Math.Abs(camera.fieldOfView - fov) < 1e-4f && graphics.Settings.effectQuality == quality &&
+                Math.Abs(graphics.Sun.intensity - bright.values.lightIntensity) < 1e-4f && graphics.Ssao.isActive == bright.values.ssaoEnabled;
+            ui.Undo();
+            var undone = JsonUtility.ToJson(graphics.Settings) == before;
+            ui.Redo();
+            Check("look_presets_listed_and_applied_in_one_undo_step [listed=" + listed + " applied=" + applied + " undone=" + undone + "]",
+                listed && applied && undone && graphics.Settings.lookPreset == bright.name && ui.UndoLabel == "룩 프리셋");
+
+            ui.Root.Q<Slider>("Exposure").value = 1.3f;
+            var modified = state.text.Contains("(수정됨)") && ui.Root.Q<Button>("LookReapply").enabledSelf;
+            Activate(ui.Root, "LookReapply");
+            Check("editing_a_look_value_marks_modified_and_reapply_restores", modified && MmdLookPresets.SameLook(bright.values, graphics.Settings) &&
+                state.text.Contains("적용됨") && !ui.Root.Q<Button>("LookReapply").enabledSelf);
+
+            // User presets: saved to the settings file, built-in names and blank names rejected, deleted.
+            var presetFile = Path.Combine(reportDirectory, "look-presets.json");
+            if (File.Exists(presetFile)) File.Delete(presetFile);
+            ui.LookPresetFilePath = presetFile; ui.LoadLooks();
+            ui.Root.Q<Slider>("Saturation").value = -40;
+            var name = ui.Root.Q<TextField>("LookName");
+            name.value = "  " + bright.name + " "; Activate(ui.Root, "LookSave");
+            var builtInRejected = ui.Error.Contains("기본 프리셋") && ui.UserLookPresets.Count == 0;
+            name.value = "   "; Activate(ui.Root, "LookSave");
+            var blankRejected = ui.Error.Contains("입력") && ui.UserLookPresets.Count == 0;
+            name.value = "내 무대"; Activate(ui.Root, "LookSave");
+            var saved = ui.UserLookPresets.Count == 1 && graphics.Settings.lookPreset == "내 무대" && File.Exists(presetFile) &&
+                File.ReadAllText(presetFile).Contains("내 무대") && dropdown.choices.Contains("내 무대") && state.text.Contains("적용됨");
+            ui.LoadLooks();
+            var reloaded = ui.UserLookPresets.Count == 1 && Math.Abs(ui.UserLookPresets[0].values.saturation + 40) < 1e-4f;
+            // A scene keeps its values when the preset changes later.
+            var sceneValues = graphics.Settings;
+            ui.Root.Q<Slider>("Saturation").value = 30;
+            name.value = "내 무대"; Activate(ui.Root, "LookSave"); // overwrite the preset with saturation 30
+            ui.ApplyGraphics(sceneValues);                        // what opening the scene file applies
+            var kept = Math.Abs(graphics.Settings.saturation + 40) < 1e-4f && graphics.Settings.lookPreset == "내 무대" && state.text.Contains("(수정됨)") &&
+                Math.Abs(ui.UserLookPresets[0].values.saturation - 30) < 1e-4f;
+            dropdown.value = "내 무대";
+            Activate(ui.Root, "LookDelete");
+            var deleted = ui.UserLookPresets.Count == 0 && graphics.Settings.lookPreset == "" && Math.Abs(graphics.Settings.saturation + 40) < 1e-4f &&
+                !File.ReadAllText(presetFile).Contains("내 무대") && !dropdown.choices.Contains("내 무대");
+            Check("user_look_presets_saved_overwritten_deleted_and_scene_keeps_values [builtIn=" + builtInRejected + " blank=" + blankRejected + " saved=" + saved +
+                " reloaded=" + reloaded + " kept=" + kept + " deleted=" + deleted + "]", builtInRejected && blankRejected && saved && reloaded && kept && deleted);
+            ui.LookPresetFilePath = null;
+
+            // Reference frames for each built-in preset (3D only, saved for the user to confirm).
+            var luminance = new List<float>();
+            for (var i = 0; i < MmdLookPresets.BuiltIn.Length; i++)
+            {
+                dropdown.value = MmdLookPresets.BuiltIn[i].name;
+                ui.UpdateDofFocus();
+                SaveRendered(camera, Path.Combine(reportDirectory, "look-" + i + ".png"));
+                luminance.Add(RenderedLuminance(camera));
+            }
+            var distinct = luminance.Zip(luminance.Skip(1), (x, y) => Math.Abs(x - y)).All(d => d > 5);
+            Check("look_preset_reference_frames_rendered_and_distinct [" + string.Join(", ", luminance.Select(v => v.ToString("0.0"))) + "]",
+                distinct && Enumerable.Range(0, MmdLookPresets.BuiltIn.Length).All(i => File.Exists(Path.Combine(reportDirectory, "look-" + i + ".png"))));
+        }
         private static bool Near(Vector3 x, Vector3 y, float tolerance = 1e-3f) => (x - y).magnitude <= tolerance;
         private static bool Near(float x, float y, float tolerance = 1e-3f) => Math.Abs(x - y) <= tolerance;
         private static bool CameraMatchesView(MmdSceneWorkspace ui) =>
@@ -1691,6 +1782,7 @@ namespace MmdStudio.Poc
             ui.Root.Q<Slider>("BackgroundR").value = .3f; ui.Root.Q<Slider>("BackgroundG").value = .2f; ui.Root.Q<Slider>("BackgroundB").value = .1f;
             Check("background_colour_sliders_set_camera_clear", Near(camera.backgroundColor, new Color(.3f, .2f, .1f)) && camera.clearFlags == CameraClearFlags.SolidColor);
             EffectChecks(ui);
+            LookChecks(ui, reportDirectory);
 
             var view = ui.View;
             Activate(ui.Root, "SaveView");

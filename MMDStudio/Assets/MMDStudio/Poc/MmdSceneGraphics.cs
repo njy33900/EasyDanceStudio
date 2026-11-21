@@ -45,6 +45,8 @@ namespace MmdStudio.Poc
         public bool vignetteEnabled;
         public float vignetteIntensity = .3f;
         public MmdEffectQuality effectQuality = MmdEffectQuality.Medium;
+        // H2a-05: name of the look preset these values came from ("" = none); the values above are authoritative.
+        public string lookPreset = "";
         public List<SavedView> savedViews = new List<SavedView>();
 
         public SceneGraphicsSettings Clone()
@@ -64,6 +66,8 @@ namespace MmdStudio.Poc
             Range(exposure, -5, 5, "노출은 -5~5 EV여야 합니다."); Range(contrast, -100, 100, "대비는 -100~100이어야 합니다."); Range(saturation, -100, 100, "채도는 -100~100이어야 합니다.");
             Colour(backgroundColor, "배경색");
             if (dofTarget == null) dofTarget = "";
+            if (lookPreset == null) lookPreset = "";
+            if (lookPreset.Length > 64) throw new ArgumentOutOfRangeException(nameof(lookPreset), "룩 프리셋 이름이 올바르지 않습니다.");
             if (dofTarget.Length > 64) throw new ArgumentOutOfRangeException(nameof(dofTarget), "초점 대상 ID가 올바르지 않습니다.");
             Range(dofDistance, .1f, 100, "초점 거리는 0.1~100 m여야 합니다."); Range(dofStrength, 0, 1, "흐림 강도는 0~1이어야 합니다.");
             Range(ssaoIntensity, 0, 4, "SSAO 강도는 0~4여야 합니다."); Range(ssaoRadius, .05f, 2, "SSAO 반경은 0.05~2 m여야 합니다.");

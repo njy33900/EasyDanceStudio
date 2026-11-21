@@ -134,6 +134,13 @@ namespace MmdStudio.Poc
                 rich.effectQuality = MmdEffectQuality.High; ui.Graphics.Apply(rich); costs.Add(MeasureRender("plus_dof_ssao_vignette_high"));
                 rich.effectQuality = MmdEffectQuality.Low; ui.Graphics.Apply(rich); costs.Add(MeasureRender("plus_dof_ssao_vignette_low"));
                 ui.Graphics.Apply(bare); costs.Add(MeasureRender("all_effects_off_shadows_off"));
+                // H2a-05: each built-in look preset on the reference scene.
+                for (var i = 0; i < MmdLookPresets.BuiltIn.Length; i++)
+                {
+                    var look = reference.Clone(); MmdLookPresets.CopyLook(MmdLookPresets.BuiltIn[i].values, look);
+                    if (look.dofEnabled) look.dofTarget = ui.Scene.Objects.First().Id;
+                    ui.Graphics.Apply(look); costs.Add(MeasureRender("look_" + i + "_" + new[] { "bright_stage", "evening_outdoor", "dark_club" }[Math.Min(i, 2)]));
+                }
             }
             report.renderCosts = costs.ToArray();
             ui.Graphics.Apply(reference);

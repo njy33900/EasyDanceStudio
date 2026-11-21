@@ -29,7 +29,7 @@ rc={x['name']:x['msPerRender'] for x in r.get('renderCosts') or []}
 for n,v in rc.items(): print('  render 1920x1080 %-40s %6.2f ms' % (n, v))
 if 'reference_bloom_tonemap_shadows_medium' in rc:
   base=rc['reference_bloom_tonemap_shadows_medium']
-  for n in ('plus_dof_ssao_vignette','plus_dof_ssao_vignette_high','plus_dof_ssao_vignette_low'):
+  for n in ['plus_dof_ssao_vignette','plus_dof_ssao_vignette_high','plus_dof_ssao_vignette_low'] + [k for k in rc if k.startswith('look_')]:
     if n in rc: print('  decision 9 (render cost): %s %+.0f%% vs reference (limit +50%%)' % (n, (rc[n]/base-1)*100))
 print('memory MB: allocated %.0f reserved %.0f mono %.0f workingset %.0f' % (r['allocatedBytes']/2**20, r['reservedBytes']/2**20, r['monoUsedBytes']/2**20, r['workingSetBytes']/2**20))
 print('notes', r['notes'])" "$A/performance.json" "$START"
