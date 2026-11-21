@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Neutral volume defaults (H2a-01): the URP assets no longer use the template's sample profile (bloom, vignette, tonemapping, motion blur); an editor step normalizes the defaults and the build fails if they drift. At runtime the app only sets its own effects. Same reference frames before and after; bloom and tonemapping verified in the rendered Player frame.
 - Structure cleanup, second pass (H1-04): viewport input rules live in `ViewportInputRouter` (tested on its own with a fake target) and the selection highlight in `SelectionHighlight`. Debug IL2CPP passes the full regression suite.
 - Structure cleanup, first pass (H1-04): repeated builds no longer rewrite the tracked smoke scene; `scripts/bash/verify-all.sh` runs the whole scene regression suite (UI, restore, format, open cancel/retry, crash recovery) and prints one summary; the scene workspace is split into input, selection, import and remove parts; file dialogs sit behind an interface so tests press the real toolbar buttons. The delete prompt no longer claims undo is unsupported.
 - Diagnostics (H1-08): "진단" in the top bar shows version, build, backend, OS, CPU, GPU, display, a scene summary and recent errors/warnings. The text shown can be exported to a file, and the log folder can be opened. No model contents or machine name; the user profile folder is masked.

@@ -24,6 +24,8 @@ namespace MmdStudio.Poc
 
             if (GraphicsSettings.defaultRenderPipeline == null)
                 throw new InvalidOperationException("A URP asset must be assigned before building.");
+            // H2a-01: the app's look starts from neutral project volume defaults.
+            StudioVolumeSetup.VerifyOrThrow();
 
             const string scenePath = "Assets/MMDStudio/Poc/PocSmoke.unity";
             Directory.CreateDirectory(Path.GetDirectoryName(scenePath));

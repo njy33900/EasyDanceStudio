@@ -96,28 +96,15 @@ namespace MmdStudio.Poc
                 Sun = new GameObject("Directional Light").AddComponent<Light>();
                 Sun.type = LightType.Directional;
             }
-            // Post-processing also applies the pipeline/global default profiles (template
-            // samples include vignette, film grain, split toning...). Override every known
-            // volume component with its neutral constructor defaults so the app owns the look.
+            // H2a-01: the project's volume defaults are neutral (StudioVolumeSetup; the build fails
+            // otherwise), so this profile carries only the app's own settings.
             profile = ScriptableObject.CreateInstance<VolumeProfile>();
             Bloom = Get<Bloom>(); Colour = Get<ColorAdjustments>(); Tonemap = Get<Tonemapping>();
-            EnsureNeutralOverrides();
             Volume = new GameObject("Scene Graphics Volume").AddComponent<Volume>();
             Volume.transform.SetParent(transform, false);
             Volume.isGlobal = true; Volume.priority = 1000; Volume.sharedProfile = profile;
             Apply(current);
         }
-        internal bool NeutralOverridesReady { get; private set; }
-        // VolumeManager is initialized by the pipeline on its first render, which can be
-        // after Initialize; until then only Bloom/ColorAdjustments/Tonemapping exist.
-        private void EnsureNeutralOverrides()
-        {
-            if (NeutralOverridesReady || profile == null || !VolumeManager.instance.isInitialized) return;
-            foreach (var type in VolumeManager.instance.baseComponentTypeArray)
-                if (!type.IsAbstract && !profile.Has(type)) profile.Add(type, true);
-            NeutralOverridesReady = true;
-        }
-        private void LateUpdate() { EnsureNeutralOverrides(); }
         private T Get<T>() where T : VolumeComponent
         {
             if (!profile.TryGet<T>(out var component)) component = profile.Add<T>(true);
@@ -140,8 +127,7 @@ namespace MmdStudio.Poc
             Sun.shadowStrength = 1;
             if (next.shadowQuality != MmdShadowQuality.Off && (QualitySettings.renderPipeline ?? GraphicsSettings.defaultRenderPipeline) is UniversalRenderPipelineAsset pipeline)
                 pipeline.mainLightShadowmapResolution = ShadowResolutions[(int)next.shadowQuality];
-            // Keep the component active: an inactive override would let the template's
-            // default-profile Bloom underneath show through. "Off" is intensity 0.
+            // "Off" is intensity 0 (the default profile underneath is neutral either way).
             Bloom.active = true;
             Bloom.intensity.value = next.bloomEnabled ? next.bloomIntensity : 0;
             Bloom.threshold.value = .9f;

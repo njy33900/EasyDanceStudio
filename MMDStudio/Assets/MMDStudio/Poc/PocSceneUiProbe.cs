@@ -1120,6 +1120,13 @@ namespace MmdStudio.Poc
             var ray = Camera.main.ScreenPointToRay(screen);
             return items.SelectMany(item => item.Model.root.GetComponentsInChildren<Renderer>()).Any(renderer => renderer.bounds.IntersectRay(ray));
         }
+        // URP post-processing components expose IsActive() (IPostProcessComponent); others
+        // (e.g. lighting options) are not screen effects.
+        private static bool IsActiveEffect(VolumeComponent component)
+        {
+            var method = component.GetType().GetMethod("IsActive", Type.EmptyTypes);
+            return method != null && method.ReturnType == typeof(bool) && (bool)method.Invoke(component, null);
+        }
         private static float RenderedLuminance(Camera camera)
         {
             const int width = 160, height = 90;
@@ -1145,12 +1152,25 @@ namespace MmdStudio.Poc
         {
             var graphics = ui.Graphics; var camera = Camera.main; var defaults = new SceneGraphicsSettings();
             var pipeline = (QualitySettings.renderPipeline ?? GraphicsSettings.defaultRenderPipeline) as UniversalRenderPipelineAsset;
-            Check("graphics_defaults_applied_with_neutral_post_processing", graphics.NeutralOverridesReady && camera.GetUniversalAdditionalCameraData().renderPostProcessing &&
+            // H2a-01: with the app's defaults, no post-processing effect is active anywhere in the
+            // camera's resolved volume stack (project defaults are neutral, nothing overridden).
+            RenderedLuminance(camera); // make sure the stack was resolved for this camera
+            var activeEffects = VolumeManager.instance.baseComponentTypeArray
+                .Select(type => VolumeManager.instance.stack.GetComponent(type))
+                .Where(component => component != null && component.active && !(component is ColorCurves) && IsActiveEffect(component))
+                .Select(component => component.GetType().Name).ToList();
+            // ColorCurves always reports active (it is baked into the colour LUT); neutral means
+            // identity curves.
+            var curves = VolumeManager.instance.stack.GetComponent<ColorCurves>();
+            foreach (var x in new[] { .1f, .5f, .9f })
+                if (curves != null && new[] { curves.master.value, curves.red.value, curves.green.value, curves.blue.value }.Any(curve => Math.Abs(curve.Evaluate(x) - x) > 1e-3f))
+                { activeEffects.Add("ColorCurves(non-identity)"); break; }
+            Check("graphics_defaults_applied_with_neutral_post_processing" + (activeEffects.Count == 0 ? "" : " [active: " + string.Join(", ", activeEffects) + "]"),
+                activeEffects.Count == 0 && camera.GetUniversalAdditionalCameraData().renderPostProcessing &&
                 graphics.Volume.isGlobal && graphics.Volume.priority >= 1000 && Near(camera.fieldOfView, defaults.fieldOfView) &&
                 Near(graphics.Sun.intensity, defaults.lightIntensity) && graphics.Sun.shadows == LightShadows.Soft && Near(camera.backgroundColor, defaults.backgroundColor) &&
-                graphics.Bloom.active && Near(graphics.Bloom.intensity.value, 0) && graphics.Tonemap.mode.value == TonemappingMode.None &&
-                graphics.Volume.sharedProfile.TryGet<Vignette>(out var vignette) && vignette.intensity.overrideState && vignette.intensity.value == 0 &&
-                graphics.Volume.sharedProfile.TryGet<FilmGrain>(out var grain) && grain.intensity.overrideState && grain.intensity.value == 0);
+                Near(graphics.Bloom.intensity.value, 0) && graphics.Tonemap.mode.value == TonemappingMode.None &&
+                graphics.Volume.sharedProfile.components.Count == 3);
 
             var previousSelection = ui.SelectedId;
             bool Shown(string name) => ui.Root.Q(name).style.display.value != DisplayStyle.None;
@@ -1199,6 +1219,25 @@ namespace MmdStudio.Poc
             var bright = RenderedLuminance(camera);
             Debug.Log("[graphics-probe] luminance exposure0=" + dark + " exposure1.5=" + bright);
             Check("exposure_brightens_actual_rendered_frame", Near(graphics.Colour.postExposure.value, 1.5f) && dark > 1 && bright > dark * 1.3f);
+            // H2a-01: the app's effects survive shader variant stripping (visible in the Player's
+            // rendered frame, not only in the volume values).
+            // Bloom acts on HDR colour before exposure: a white background exceeds its threshold, and
+            // exposure -2 keeps the result from clipping. (The frame's brightness is mostly background.)
+            ui.Root.Q<Slider>("Exposure").value = -2;
+            ui.Root.Q<Slider>("BackgroundR").value = 1; ui.Root.Q<Slider>("BackgroundG").value = 1; ui.Root.Q<Slider>("BackgroundB").value = 1;
+            var litPlain = RenderedLuminance(camera);
+            ui.Root.Q<Toggle>("Bloom").value = true; ui.Root.Q<Slider>("BloomIntensity").value = 5;
+            var bloomed = RenderedLuminance(camera);
+            ui.Root.Q<Toggle>("Bloom").value = false; ui.Root.Q<Slider>("BloomIntensity").value = 2;
+            ui.Root.Q<Slider>("Exposure").value = 1.5f;
+            ui.Root.Q<Slider>("BackgroundR").value = .08f; ui.Root.Q<Slider>("BackgroundG").value = .1f; ui.Root.Q<Slider>("BackgroundB").value = .14f;
+            ui.Root.Q<Toggle>("Tonemapping").value = true;
+            var toned = RenderedLuminance(camera);
+            ui.Root.Q<Toggle>("Tonemapping").value = false;
+            var plain = RenderedLuminance(camera);
+            Debug.Log("[graphics-probe] luminance plain=" + plain + " tonemapped=" + toned + " white=" + litPlain + " white+bloom5=" + bloomed);
+            Check("bloom_and_tonemapping_change_rendered_frame" + " [white=" + litPlain + " bloom=" + bloomed + " plain=" + plain + " toned=" + toned + "]",
+                bloomed > litPlain + .5f && Math.Abs(toned - plain) > .5f && Math.Abs(plain - bright) < .5f);
 
             ui.Root.Q<Slider>("BackgroundR").value = .3f; ui.Root.Q<Slider>("BackgroundG").value = .2f; ui.Root.Q<Slider>("BackgroundB").value = .1f;
             Check("background_colour_sliders_set_camera_clear", Near(camera.backgroundColor, new Color(.3f, .2f, .1f)) && camera.clearFlags == CameraClearFlags.SolidColor);
