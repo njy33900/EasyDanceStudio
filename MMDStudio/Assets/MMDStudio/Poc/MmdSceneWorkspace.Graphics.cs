@@ -51,7 +51,90 @@ namespace MmdStudio.Poc
             GraphicsSlider(graphicsSection, "BackgroundR", "배경 R", 0, 1, s => s.backgroundColor.r, (s, v) => s.backgroundColor.r = v);
             GraphicsSlider(graphicsSection, "BackgroundG", "배경 G", 0, 1, s => s.backgroundColor.g, (s, v) => s.backgroundColor.g = v);
             GraphicsSlider(graphicsSection, "BackgroundB", "배경 B", 0, 1, s => s.backgroundColor.b, (s, v) => s.backgroundColor.b = v);
-            Text(graphicsSection, "DOF · SSAO · 툰 셰이더는 2차 예정입니다.", "eds-note").name = "GraphicsNote";
+            // H2a-02: SSAO, depth of field, vignette, effect quality, reset.
+            GraphicsToggle(graphicsSection, "Ssao", "SSAO (앰비언트 오클루전)", s => s.ssaoEnabled, (s, v) => s.ssaoEnabled = v);
+            GraphicsSlider(graphicsSection, "SsaoIntensity", "SSAO 강도", 0, 4, s => s.ssaoIntensity, (s, v) => s.ssaoIntensity = v);
+            GraphicsSlider(graphicsSection, "SsaoRadius", "SSAO 반경 (m)", .05f, 2, s => s.ssaoRadius, (s, v) => s.ssaoRadius = v);
+            GraphicsToggle(graphicsSection, "Dof", "피사계 심도 (DOF)", s => s.dofEnabled, (s, v) => s.dofEnabled = v);
+            dofTarget = new DropdownField("초점 대상", new List<string> { FocusByDistance }, 0) { name = "DofTarget" }; graphicsSection.Add(dofTarget);
+            dofTarget.RegisterValueChangedCallback(evt =>
+            {
+                var index = dofTarget.choices.IndexOf(evt.newValue);
+                var id = index > 0 && index - 1 < dofTargetIds.Count ? dofTargetIds[index - 1] : "";
+                ChangeGraphics(s => s.dofTarget = id);
+            });
+            GraphicsSlider(graphicsSection, "DofDistance", "초점 거리 (m)", .1f, 50, s => s.dofDistance, (s, v) => s.dofDistance = v);
+            GraphicsSlider(graphicsSection, "DofStrength", "흐림 강도", 0, 1, s => s.dofStrength, (s, v) => s.dofStrength = v);
+            GraphicsToggle(graphicsSection, "Vignette", "비네트", s => s.vignetteEnabled, (s, v) => s.vignetteEnabled = v);
+            GraphicsSlider(graphicsSection, "VignetteIntensity", "비네트 강도", 0, 1, s => s.vignetteIntensity, (s, v) => s.vignetteIntensity = v);
+            effectQuality = new DropdownField("효과 품질", QualityLabels.ToList(), 1) { name = "EffectQuality" }; graphicsSection.Add(effectQuality);
+            effectQuality.RegisterValueChangedCallback(evt =>
+            {
+                var index = Array.IndexOf(QualityLabels, evt.newValue);
+                if (index >= 0) ChangeGraphics(s => s.effectQuality = (MmdEffectQuality)index);
+            });
+            graphicsBinders.Add(s => effectQuality.SetValueWithoutNotify(QualityLabels[(int)s.effectQuality]));
+            var resetRow = Element(graphicsSection, "eds-row-buttons");
+            TextButton(resetRow, "ResetEffects", "효과 초기화", () => Guard(ResetEffects), "eds-button--block");
+            Text(graphicsSection, "초점 대상을 고르면 그 캐릭터까지의 거리에 초점을 맞춥니다. 툰 셰이더(재질 스타일)는 H2b 예정입니다.", "eds-note").name = "GraphicsNote";
+            var lightReset = Element(lightSection, "eds-row-buttons");
+            TextButton(lightReset, "ResetLight", "조명 초기화", () => Guard(ResetLight), "eds-button--block");
+        }
+        private DropdownField dofTarget, effectQuality;
+        private readonly List<string> dofTargetIds = new List<string>();
+        private const string FocusByDistance = "거리 지정";
+        private static readonly string[] QualityLabels = { "낮음", "보통", "높음" };
+
+        // Post-processing back to the defaults; camera, light, background and saved views stay.
+        private void ResetEffects()
+        {
+            var next = Graphics.Settings; var d = new SceneGraphicsSettings();
+            next.bloomEnabled = d.bloomEnabled; next.bloomIntensity = d.bloomIntensity; next.tonemapping = d.tonemapping;
+            next.exposure = d.exposure; next.contrast = d.contrast; next.saturation = d.saturation;
+            next.dofEnabled = d.dofEnabled; next.dofTarget = d.dofTarget; next.dofDistance = d.dofDistance; next.dofStrength = d.dofStrength;
+            next.ssaoEnabled = d.ssaoEnabled; next.ssaoIntensity = d.ssaoIntensity; next.ssaoRadius = d.ssaoRadius;
+            next.vignetteEnabled = d.vignetteEnabled; next.vignetteIntensity = d.vignetteIntensity; next.effectQuality = d.effectQuality;
+            Record("효과 초기화", null, () => Graphics.Apply(next)); message = "효과를 기본값으로 되돌렸습니다.";
+        }
+        private void ResetLight()
+        {
+            var next = Graphics.Settings; var d = new SceneGraphicsSettings();
+            next.lightColor = d.lightColor; next.lightIntensity = d.lightIntensity; next.lightYaw = d.lightYaw; next.lightPitch = d.lightPitch; next.shadowQuality = d.shadowQuality;
+            Record("조명 초기화", null, () => Graphics.Apply(next)); message = "조명을 기본값으로 되돌렸습니다.";
+        }
+
+        // Focus target choices: the characters in the scene (a missing target falls back to the distance).
+        private void RefreshDofTargets(SceneGraphicsSettings settings)
+        {
+            dofTargetIds.Clear();
+            var choices = new List<string> { FocusByDistance };
+            var names = new Dictionary<string, int>();
+            foreach (var item in Scene.Objects.Where(o => o.Kind == MmdSceneService.ObjectKind.Character))
+            {
+                var name = System.IO.Path.GetFileNameWithoutExtension(item.ModelSource);
+                names[name] = names.TryGetValue(name, out var n) ? n + 1 : 1;
+                choices.Add(names[name] > 1 ? name + " (" + names[name] + ")" : name);
+                dofTargetIds.Add(item.Id);
+            }
+            var index = dofTargetIds.IndexOf(settings.dofTarget);
+            if (index < 0 && settings.dofTarget.Length > 0) choices[0] = FocusByDistance + " (대상 없음)";
+            dofTarget.choices = choices;
+            dofTarget.SetValueWithoutNotify(choices[index + 1]);
+        }
+
+        // Every frame: keep the focus on the target character (camera-space depth of its bounds centre).
+        internal void UpdateDofFocus()
+        {
+            if (Graphics == null) return;
+            var settings = Graphics.CurrentSettings;
+            float? focus = null;
+            if (settings.dofEnabled && settings.dofTarget.Length > 0)
+            {
+                var item = Scene.Objects.FirstOrDefault(o => o.Id == settings.dofTarget);
+                if (item != null && item.Visible && TryBounds(new[] { item }, out var bounds))
+                    focus = Vector3.Dot(bounds.center - Camera.main.transform.position, Camera.main.transform.forward);
+            }
+            Graphics.SetFocusOverride(focus);
         }
         private void ShowGraphicsSections(InspectorTarget target)
         {
@@ -116,6 +199,7 @@ namespace MmdStudio.Poc
             if (Graphics == null || graphicsSection == null) return;
             var settings = Graphics.Settings;
             foreach (var bind in graphicsBinders) bind(settings);
+            RefreshDofTargets(settings);
             savedViewList.Clear();
             for (var i = 0; i < settings.savedViews.Count; i++)
             {

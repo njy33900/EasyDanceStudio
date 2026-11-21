@@ -442,6 +442,7 @@ namespace MmdStudio.Poc
         private void LateUpdate()
         {
             UpdateHighlight();
+            UpdateDofFocus();
             // The camera or a placement may have moved: redraw the gizmo while it exists.
             if (gizmoOverlay != null && GizmoTarget != null) gizmoOverlay.MarkDirtyRepaint();
         }

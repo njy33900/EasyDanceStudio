@@ -25,6 +25,14 @@ namespace MmdStudio.Poc
             public long managedBytesStart, managedBytesEnd;
             public bool meetsThirtyFpsTarget;
         }
+        // H2a-02: cost of one 1920x1080 render of the main camera, independent of the display's
+        // frame cap (the windowed Player may be held at the refresh rate even with vsync off).
+        [Serializable] public sealed class RenderCost
+        {
+            public string name;
+            public int renders;
+            public float msPerRender;
+        }
         [Serializable] private sealed class Report
         {
             public bool success;
@@ -35,6 +43,7 @@ namespace MmdStudio.Poc
             public int objects;
             public long allocatedBytes, reservedBytes, monoUsedBytes, workingSetBytes;
             public Pass[] passes;
+            public RenderCost[] renderCosts;
             public string[] notes;
         }
 
@@ -105,6 +114,30 @@ namespace MmdStudio.Poc
             ui.Scene.Loop = true; ui.Scene.Speed = 1; ui.Scene.AutomaticClock = true;
             ui.Scene.Seek(Math.Min(30, ui.Scene.Duration * .2)); ui.Scene.Playing = true;
             yield return Measure("effects_on_shadows_medium", 3, 20, passes);
+            // H2a-02 / decision 9: DOF (bokeh, on the first character) + SSAO + vignette on top of the reference look.
+            var rich = ui.Graphics.Settings; rich.dofEnabled = true; rich.dofTarget = ui.Scene.Objects.First().Id; rich.ssaoEnabled = true; rich.vignetteEnabled = true;
+            ui.Graphics.Apply(rich);
+            yield return Measure("effects_on_dof_ssao_vignette", 2, 15, passes);
+            rich.effectQuality = MmdEffectQuality.High; ui.Graphics.Apply(rich);
+            yield return Measure("effects_on_dof_ssao_vignette_high", 2, 15, passes);
+            // Render cost per frame (paused, same frame): reference look, + DOF/SSAO/vignette, high quality, all off.
+            ui.Scene.Playing = false;
+            var costs = new List<RenderCost>();
+            var reference = ui.Graphics.Settings; reference.dofEnabled = false; reference.ssaoEnabled = false; reference.vignetteEnabled = false; reference.effectQuality = MmdEffectQuality.Medium;
+            var bare = reference.Clone(); bare.bloomEnabled = false; bare.tonemapping = false; bare.shadowQuality = MmdShadowQuality.Off;
+            // Two rounds; only the second is kept (the first allocates targets and warms shaders).
+            for (var round = 0; round < 2; round++)
+            {
+                costs.Clear();
+                ui.Graphics.Apply(reference); costs.Add(MeasureRender("reference_bloom_tonemap_shadows_medium"));
+                rich.effectQuality = MmdEffectQuality.Medium; ui.Graphics.Apply(rich); costs.Add(MeasureRender("plus_dof_ssao_vignette"));
+                rich.effectQuality = MmdEffectQuality.High; ui.Graphics.Apply(rich); costs.Add(MeasureRender("plus_dof_ssao_vignette_high"));
+                rich.effectQuality = MmdEffectQuality.Low; ui.Graphics.Apply(rich); costs.Add(MeasureRender("plus_dof_ssao_vignette_low"));
+                ui.Graphics.Apply(bare); costs.Add(MeasureRender("all_effects_off_shadows_off"));
+            }
+            report.renderCosts = costs.ToArray();
+            ui.Graphics.Apply(reference);
+            ui.Scene.Playing = true;
             var plain = ui.Graphics.Settings; plain.bloomEnabled = false; plain.tonemapping = false; plain.shadowQuality = MmdShadowQuality.Off;
             ui.Graphics.Apply(plain);
             yield return Measure("effects_off_shadows_off", 2, 15, passes);
@@ -122,6 +155,33 @@ namespace MmdStudio.Poc
             if (!Debug.isDebugBuild) notes.Add("Release build.");
             else notes.Add("Development build: timings include development overhead; use the Release report for the target.");
             Finish(reportPath, report, notes, null);
+        }
+
+        private static RenderCost MeasureRender(string name)
+        {
+            const int width = 1920, height = 1080, renders = 120;
+            var camera = Camera.main;
+            var texture = new RenderTexture(width, height, 24, RenderTextureFormat.ARGB32);
+            var probe = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+            var previousTarget = camera.targetTexture; var previousActive = RenderTexture.active;
+            try
+            {
+                camera.targetTexture = texture;
+                void Sync() { RenderTexture.active = texture; probe.ReadPixels(new Rect(0, 0, 1, 1), 0, 0); probe.Apply(); }
+                for (var i = 0; i < 5; i++) camera.Render();
+                Sync();
+                var watch = Stopwatch.StartNew();
+                for (var i = 0; i < renders; i++) camera.Render();
+                Sync(); // waits for the GPU to finish the queued renders
+                var cost = new RenderCost { name = name, renders = renders, msPerRender = (float)(watch.Elapsed.TotalMilliseconds / renders) };
+                Debug.Log("[perf-probe] render " + name + " " + cost.msPerRender.ToString("F2") + " ms");
+                return cost;
+            }
+            finally
+            {
+                camera.targetTexture = previousTarget; RenderTexture.active = previousActive;
+                texture.Release(); Destroy(texture); Destroy(probe);
+            }
         }
 
         private static IEnumerator Measure(string name, float warmupSeconds, float seconds, List<Pass> passes)

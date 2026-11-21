@@ -1393,7 +1393,8 @@ namespace MmdStudio.Poc
                 graphics.Volume.isGlobal && graphics.Volume.priority >= 1000 && Near(camera.fieldOfView, defaults.fieldOfView) &&
                 Near(graphics.Sun.intensity, defaults.lightIntensity) && graphics.Sun.shadows == LightShadows.Soft && Near(camera.backgroundColor, defaults.backgroundColor) &&
                 Near(graphics.Bloom.intensity.value, 0) && graphics.Tonemap.mode.value == TonemappingMode.None &&
-                graphics.Volume.sharedProfile.components.Count == 3);
+                graphics.Dof.mode.value == DepthOfFieldMode.Off && Near(graphics.Vignette.intensity.value, 0) &&
+                graphics.Ssao != null && !graphics.Ssao.isActive && graphics.Volume.sharedProfile.components.Count == 5);
 
             var previousSelection = ui.SelectedId;
             bool Shown(string name) => ui.Root.Q(name).style.display.value != DisplayStyle.None;
@@ -1464,6 +1465,7 @@ namespace MmdStudio.Poc
 
             ui.Root.Q<Slider>("BackgroundR").value = .3f; ui.Root.Q<Slider>("BackgroundG").value = .2f; ui.Root.Q<Slider>("BackgroundB").value = .1f;
             Check("background_colour_sliders_set_camera_clear", Near(camera.backgroundColor, new Color(.3f, .2f, .1f)) && camera.clearFlags == CameraClearFlags.SolidColor);
+            EffectChecks(ui);
 
             var view = ui.View;
             Activate(ui.Root, "SaveView");
@@ -1481,12 +1483,141 @@ namespace MmdStudio.Poc
             Check("view_reset_restores_default_angle_and_frames_all", Near(view.Yaw, MmdViewportCamera.DefaultYaw) && Near(view.Pitch, MmdViewportCamera.DefaultPitch) &&
                 ui.SafeViewportRect().Contains((Vector2)camera.WorldToScreenPoint(all.center)) && CameraMatchesView(ui));
 
-            // Presentation defaults for the screenshots: default light/background, Bloom and tonemapping on.
-            ui.ApplyGraphics(new SceneGraphicsSettings { bloomEnabled = true, tonemapping = true });
+            // Presentation defaults for the screenshots: default light/background, Bloom and tonemapping
+            // on; H2a-02 SSAO, vignette and DOF on the first character (saved and checked on relaunch).
+            var focusCharacter = ui.Scene.Objects.First(o => o.Kind == MmdSceneService.ObjectKind.Character);
+            ui.ApplyGraphics(new SceneGraphicsSettings { bloomEnabled = true, tonemapping = true, ssaoEnabled = true, vignetteEnabled = true,
+                dofEnabled = true, dofTarget = focusCharacter.Id, dofStrength = .3f });
             Check("controls_reflect_whole_state_apply", ui.Error.Length == 0 && ui.Root.Q<Toggle>("Bloom").value && ui.Root.Q<Toggle>("Tonemapping").value &&
+                ui.Root.Q<Toggle>("Ssao").value && ui.Root.Q<Toggle>("Dof").value && ui.Root.Q<DropdownField>("DofTarget").index == 1 &&
                 Near(ui.Root.Q<Slider>("Exposure").value, 0) && Near(ui.Root.Q<Slider>("Fov").value, defaults.fieldOfView) &&
                 Near(ui.Root.Q<Slider>("LightIntensity").value, defaults.lightIntensity) && ui.Root.Q<DropdownField>("ShadowQuality").value == "보통 (2048)");
             if (previousSelection != null) ui.Select(previousSelection);
+        }
+        private static Color32[] RenderedPixels(Camera camera)
+        {
+            const int width = 320, height = 180;
+            var texture = RenderTexture.GetTemporary(width, height, 24);
+            var previousTarget = camera.targetTexture; var previousRect = camera.rect; var previousActive = RenderTexture.active;
+            var pixels = new Texture2D(width, height, TextureFormat.RGBA32, false);
+            try
+            {
+                camera.targetTexture = texture; camera.rect = new Rect(0, 0, 1, 1);
+                camera.Render();
+                RenderTexture.active = texture;
+                pixels.ReadPixels(new Rect(0, 0, width, height), 0, 0); pixels.Apply();
+                return pixels.GetPixels32();
+            }
+            finally
+            {
+                RenderTexture.active = previousActive; camera.targetTexture = previousTarget; camera.rect = previousRect;
+                RenderTexture.ReleaseTemporary(texture); Destroy(pixels);
+            }
+        }
+        // Edge energy of the rendered frame: mean absolute luminance step between neighbouring pixels.
+        private static float RenderedSharpness(Camera camera)
+        {
+            const int width = 320, height = 180;
+            var texture = RenderTexture.GetTemporary(width, height, 24);
+            var previousTarget = camera.targetTexture; var previousRect = camera.rect; var previousActive = RenderTexture.active;
+            var pixels = new Texture2D(width, height, TextureFormat.RGBA32, false);
+            try
+            {
+                camera.targetTexture = texture; camera.rect = new Rect(0, 0, 1, 1);
+                camera.Render();
+                RenderTexture.active = texture;
+                pixels.ReadPixels(new Rect(0, 0, width, height), 0, 0); pixels.Apply();
+                var data = pixels.GetPixels32();
+                float L(int x, int y) { var p = data[y * width + x]; return .2126f * p.r + .7152f * p.g + .0722f * p.b; }
+                double sum = 0;
+                for (var y = 0; y < height - 1; y++)
+                    for (var x = 0; x < width - 1; x++) sum += Math.Abs(L(x + 1, y) - L(x, y)) + Math.Abs(L(x, y + 1) - L(x, y));
+                return (float)(sum / ((width - 1) * (height - 1)));
+            }
+            finally
+            {
+                RenderTexture.active = previousActive; camera.targetTexture = previousTarget; camera.rect = previousRect;
+                RenderTexture.ReleaseTemporary(texture); Destroy(pixels);
+            }
+        }
+        // H2a-02: SSAO, depth of field, vignette, effect quality and the reset buttons, checked on
+        // the rendered Player frame (the effects must survive shader stripping and reflection).
+        private void EffectChecks(MmdSceneWorkspace ui)
+        {
+            var graphics = ui.Graphics; var camera = Camera.main;
+            var a = ui.Scene.Objects.First(o => o.Kind == MmdSceneService.ObjectKind.Character);
+            var view = ui.View; var savedView = (view.Pivot, view.Yaw, view.Pitch, view.Distance);
+            ui.FrameIds(a.Id); // the character fills the frame, so per-pixel effects are measurable
+            ui.Root.Q<Slider>("BackgroundR").value = .9f; ui.Root.Q<Slider>("BackgroundG").value = .9f; ui.Root.Q<Slider>("BackgroundB").value = .9f;
+            ui.Root.Q<Slider>("Exposure").value = 0;
+            var aoOff = RenderedLuminance(camera); var offPixels = RenderedPixels(camera);
+            ui.Root.Q<Toggle>("Ssao").value = true; ui.Root.Q<Slider>("SsaoIntensity").value = 4; ui.Root.Q<Slider>("SsaoRadius").value = 1;
+            var ssao = graphics.SsaoSettings;
+            var aoOn = RenderedLuminance(camera); var onPixels = RenderedPixels(camera);
+            // The characters are small in this framing: count the pixels the occlusion darkened.
+            int darkened = 0, brightened = 0;
+            for (var i = 0; i < offPixels.Length; i++)
+            {
+                var step = (onPixels[i].r + onPixels[i].g + onPixels[i].b) - (offPixels[i].r + offPixels[i].g + offPixels[i].b);
+                if (step <= -9) darkened++; else if (step >= 9) brightened++;
+            }
+            var darkenedShare = darkened / (float)offPixels.Length;
+            var ssaoOn = graphics.Ssao.isActive && Near((float)MmdSceneGraphics.SsaoField(ssao, "Intensity"), 4) && Near((float)MmdSceneGraphics.SsaoField(ssao, "Radius"), 1) &&
+                (bool)MmdSceneGraphics.SsaoField(ssao, "AfterOpaque");
+            ui.Root.Q<Toggle>("Ssao").value = false;
+            var aoBack = RenderedLuminance(camera);
+            Check("ssao_controls_drive_renderer_feature_and_darken_frame [off=" + aoOff.ToString("0.00") + " on=" + aoOn.ToString("0.00") + " back=" + aoBack.ToString("0.00") +
+                " darkened " + (darkenedShare * 100).ToString("0.00") + "% brightened " + brightened + "]",
+                ssaoOn && aoOn < aoOff && darkenedShare > .002f && brightened < darkened / 10 && !graphics.Ssao.isActive && Math.Abs(aoBack - aoOff) < .05f);
+
+            var sharp = RenderedSharpness(camera);
+            ui.Root.Q<Toggle>("Dof").value = true; ui.Root.Q<Slider>("DofDistance").value = .3f; ui.Root.Q<Slider>("DofStrength").value = 1;
+            ui.UpdateDofFocus();
+            var blurred = RenderedSharpness(camera);
+            var near = graphics.Dof.mode.value == DepthOfFieldMode.Bokeh && Near(graphics.FocusDistance, .3f);
+            var target = ui.Root.Q<DropdownField>("DofTarget");
+            target.value = target.choices[1];
+            ui.UpdateDofFocus();
+            MmdSceneWorkspace.TryBounds(new[] { a }, out var bounds);
+            var depth = Vector3.Dot(bounds.center - camera.transform.position, camera.transform.forward);
+            var follows = graphics.Settings.dofTarget == a.Id && Near(graphics.FocusDistance, depth, 1e-3f);
+            var focused = RenderedSharpness(camera);
+            Check("dof_blurs_frame_and_focuses_on_target_character [sharp=" + sharp.ToString("0.00") + " blurred=" + blurred.ToString("0.00") + " focused=" + focused.ToString("0.00") +
+                " near=" + near + " follows=" + follows + "]", near && follows && blurred < sharp * .8f && focused > blurred * 1.1f);
+
+            var quality = ui.Root.Q<DropdownField>("EffectQuality");
+            quality.value = "낮음";
+            var low = graphics.Dof.mode.value == DepthOfFieldMode.Gaussian && (bool)MmdSceneGraphics.SsaoField(ssao, "Downsample") &&
+                Convert.ToInt32(MmdSceneGraphics.SsaoField(ssao, "Samples")) == 2 && !graphics.Bloom.highQualityFiltering.value;
+            quality.value = "높음";
+            var high = graphics.Dof.mode.value == DepthOfFieldMode.Bokeh && !(bool)MmdSceneGraphics.SsaoField(ssao, "Downsample") &&
+                Convert.ToInt32(MmdSceneGraphics.SsaoField(ssao, "Samples")) == 0 && graphics.Bloom.highQualityFiltering.value;
+            quality.value = "보통";
+            ui.Root.Q<Toggle>("Dof").value = false;
+            var vignetteOff = RenderedLuminance(camera);
+            ui.Root.Q<Toggle>("Vignette").value = true; ui.Root.Q<Slider>("VignetteIntensity").value = 1;
+            var vignetteOn = RenderedLuminance(camera);
+            Check("quality_preset_and_vignette_apply [vignette " + vignetteOff.ToString("0.0") + "->" + vignetteOn.ToString("0.0") + " low=" + low + " high=" + high + "]",
+                low && high && graphics.Settings.effectQuality == MmdEffectQuality.Medium && Near(graphics.Vignette.intensity.value, 1) && vignetteOn < vignetteOff - 2);
+
+            // Reset buttons: effects and light separately, both undoable.
+            ui.Root.Q<Toggle>("Ssao").value = true; ui.Root.Q<Slider>("LightIntensity").value = 5;
+            var before = JsonUtility.ToJson(graphics.Settings);
+            Activate(ui.Root, "ResetEffects");
+            var d = new SceneGraphicsSettings(); var e = graphics.Settings;
+            var effectsReset = !e.ssaoEnabled && !e.vignetteEnabled && !e.dofEnabled && e.dofTarget == "" && Near(e.vignetteIntensity, d.vignetteIntensity) &&
+                Near(e.ssaoIntensity, d.ssaoIntensity) && Near(e.exposure, 0) && Near(e.lightIntensity, 5) && Near(e.backgroundColor, new Color(.9f, .9f, .9f)) && !graphics.Ssao.isActive;
+            ui.Undo();
+            var undone = JsonUtility.ToJson(graphics.Settings) == before && graphics.Ssao.isActive;
+            Activate(ui.Root, "ResetLight");
+            var l = graphics.Settings;
+            var lightReset = Near(l.lightIntensity, d.lightIntensity) && Near(l.lightYaw, d.lightYaw) && Near(l.lightPitch, d.lightPitch) && l.ssaoEnabled && Near(graphics.Sun.intensity, d.lightIntensity);
+            ui.Undo();
+            Check("reset_effects_and_light_are_separate_and_undoable [effects=" + effectsReset + " undone=" + undone + " light=" + lightReset + "]",
+                effectsReset && undone && lightReset && JsonUtility.ToJson(graphics.Settings) == before);
+            ui.Root.Q<Toggle>("Ssao").value = false; ui.Root.Q<Toggle>("Vignette").value = false;
+            view.Set(savedView.Pivot, savedView.Yaw, savedView.Pitch, savedView.Distance); view.Apply(camera);
+            ui.Root.Q<Slider>("BackgroundR").value = .3f; ui.Root.Q<Slider>("BackgroundG").value = .2f; ui.Root.Q<Slider>("BackgroundB").value = .1f;
         }
         private void PickingChecks(MmdSceneWorkspace ui, MmdSceneService.SceneObject a, MmdSceneService.SceneObject b, MmdSceneService.SceneObject stage)
         {

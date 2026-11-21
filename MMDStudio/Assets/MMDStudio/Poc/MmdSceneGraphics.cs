@@ -8,6 +8,8 @@ using UnityEngine.Rendering.Universal;
 namespace MmdStudio.Poc
 {
     public enum MmdShadowQuality { Off, Low, Medium, High }
+    // H2a-02: sampling quality of the screen effects (SSAO samples/resolution/blur, DOF mode, bloom filtering).
+    public enum MmdEffectQuality { Low, Medium, High }
 
     [Serializable]
     public sealed class SavedView
@@ -33,6 +35,16 @@ namespace MmdStudio.Poc
         public bool tonemapping;
         public float exposure, contrast, saturation;
         public Color backgroundColor = new Color(.925f, .93f, .94f, 1); // matches the light viewport card
+        // H2a-02 (all off by default; older scene files without these fields open with the defaults).
+        public bool dofEnabled;
+        public string dofTarget = "";      // scene object ID to keep in focus; empty = fixed distance
+        public float dofDistance = 4;       // metres, used without a target (or when it is gone)
+        public float dofStrength = .5f;     // 0..1 -> aperture f/16..f/1.4 at 70 mm
+        public bool ssaoEnabled;
+        public float ssaoIntensity = 1, ssaoRadius = .3f;
+        public bool vignetteEnabled;
+        public float vignetteIntensity = .3f;
+        public MmdEffectQuality effectQuality = MmdEffectQuality.Medium;
         public List<SavedView> savedViews = new List<SavedView>();
 
         public SceneGraphicsSettings Clone()
@@ -51,6 +63,12 @@ namespace MmdStudio.Poc
             Range(bloomIntensity, 0, 10, "Bloom 강도는 0~10이어야 합니다.");
             Range(exposure, -5, 5, "노출은 -5~5 EV여야 합니다."); Range(contrast, -100, 100, "대비는 -100~100이어야 합니다."); Range(saturation, -100, 100, "채도는 -100~100이어야 합니다.");
             Colour(backgroundColor, "배경색");
+            if (dofTarget == null) dofTarget = "";
+            if (dofTarget.Length > 64) throw new ArgumentOutOfRangeException(nameof(dofTarget), "초점 대상 ID가 올바르지 않습니다.");
+            Range(dofDistance, .1f, 100, "초점 거리는 0.1~100 m여야 합니다."); Range(dofStrength, 0, 1, "흐림 강도는 0~1이어야 합니다.");
+            Range(ssaoIntensity, 0, 4, "SSAO 강도는 0~4여야 합니다."); Range(ssaoRadius, .05f, 2, "SSAO 반경은 0.05~2 m여야 합니다.");
+            Range(vignetteIntensity, 0, 1, "비네트 강도는 0~1이어야 합니다.");
+            if (!Enum.IsDefined(typeof(MmdEffectQuality), effectQuality)) throw new ArgumentOutOfRangeException(nameof(effectQuality), "효과 품질 값이 올바르지 않습니다.");
             if (savedViews == null || savedViews.Count > MaxSavedViews) throw new ArgumentOutOfRangeException(nameof(savedViews), "저장된 시점은 최대 " + MaxSavedViews + "개입니다.");
             foreach (var view in savedViews)
             {
@@ -82,7 +100,15 @@ namespace MmdStudio.Poc
         internal Bloom Bloom { get; private set; }
         internal ColorAdjustments Colour { get; private set; }
         internal Tonemapping Tonemap { get; private set; }
+        internal DepthOfField Dof { get; private set; }
+        internal Vignette Vignette { get; private set; }
+        // The PC renderer's SSAO feature (null when the pipeline has none).
+        internal ScreenSpaceAmbientOcclusion Ssao { get; private set; }
+        // H2a-02: distance to the focus target, set every frame by the workspace (null: dofDistance).
+        private float? focusOverride;
+        internal float FocusDistance => Dof.focusDistance.value;
         public SceneGraphicsSettings Settings => current.Clone();
+        internal SceneGraphicsSettings CurrentSettings => current; // read only, no copy
 
         public void Initialize(Camera camera)
         {
@@ -100,6 +126,8 @@ namespace MmdStudio.Poc
             // otherwise), so this profile carries only the app's own settings.
             profile = ScriptableObject.CreateInstance<VolumeProfile>();
             Bloom = Get<Bloom>(); Colour = Get<ColorAdjustments>(); Tonemap = Get<Tonemapping>();
+            Dof = Get<DepthOfField>(); Vignette = Get<Vignette>();
+            Ssao = FindSsao();
             Volume = new GameObject("Scene Graphics Volume").AddComponent<Volume>();
             Volume.transform.SetParent(transform, false);
             Volume.isGlobal = true; Volume.priority = 1000; Volume.sharedProfile = profile;
@@ -135,12 +163,83 @@ namespace MmdStudio.Poc
             Colour.postExposure.value = next.exposure;
             Colour.contrast.value = next.contrast;
             Colour.saturation.value = next.saturation;
+            Bloom.highQualityFiltering.value = next.effectQuality == MmdEffectQuality.High;
+            // DOF: Gaussian (cheap, background only) at low quality, Bokeh otherwise.
+            Dof.mode.value = !next.dofEnabled ? DepthOfFieldMode.Off : next.effectQuality == MmdEffectQuality.Low ? DepthOfFieldMode.Gaussian : DepthOfFieldMode.Bokeh;
+            Dof.focalLength.value = 70; Dof.bladeCount.value = 6; Dof.bladeCurvature.value = 1;
+            Dof.aperture.value = 16 * Mathf.Pow(1.4f / 16, next.dofStrength);
+            Dof.gaussianMaxRadius.value = Mathf.Lerp(.5f, 1.5f, next.dofStrength);
+            Dof.highQualitySampling.value = next.effectQuality != MmdEffectQuality.Low;
+            Vignette.intensity.value = next.vignetteEnabled ? next.vignetteIntensity : 0;
+            Vignette.smoothness.value = .4f; Vignette.color.value = Color.black; Vignette.rounded.value = false;
+            ApplySsao(next);
             current = next;
+            ApplyFocus();
+        }
+
+        // Focus target distance (camera-space depth); null returns to the fixed distance.
+        internal void SetFocusOverride(float? distance)
+        {
+            if (distance.HasValue && (float.IsNaN(distance.Value) || float.IsInfinity(distance.Value))) distance = null;
+            focusOverride = distance.HasValue ? Mathf.Clamp(distance.Value, .1f, 100) : (float?)null;
+            ApplyFocus();
+        }
+        private void ApplyFocus()
+        {
+            var focus = focusOverride ?? current.dofDistance;
+            Dof.focusDistance.value = focus;
+            // Gaussian: sharp to just behind the focus, fully blurred a few metres further
+            // (closer as the strength rises).
+            Dof.gaussianStart.value = focus + .5f;
+            Dof.gaussianEnd.value = focus + .5f + Mathf.Lerp(12, 2, current.dofStrength);
+        }
+
+        // SSAO is a renderer feature, not a volume component. Its settings class is internal to
+        // URP, so the fields the app owns are set by reflection (serialized fields, so they survive
+        // IL2CPP stripping); the probe checks the rendered result. The feature stays enabled in the
+        // asset (its shaders are kept in the build) and is switched at runtime.
+        private static ScreenSpaceAmbientOcclusion FindSsao()
+        {
+            if (!((QualitySettings.renderPipeline ?? GraphicsSettings.defaultRenderPipeline) is UniversalRenderPipelineAsset pipeline)) return null;
+            foreach (var data in pipeline.rendererDataList)
+                if (data != null && data.TryGetRendererFeature<ScreenSpaceAmbientOcclusion>(out var feature)) return feature;
+            return null;
+        }
+        private const System.Reflection.BindingFlags Hidden = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public;
+        internal object SsaoSettings => Ssao == null ? null : typeof(ScreenSpaceAmbientOcclusion).GetField("m_Settings", Hidden)?.GetValue(Ssao);
+        internal static object SsaoField(object settings, string name) => settings?.GetType().GetField(name, Hidden)?.GetValue(settings);
+        private void ApplySsao(SceneGraphicsSettings next)
+        {
+            if (Ssao == null) return;
+            var settings = SsaoSettings ?? throw new InvalidOperationException("SSAO 설정에 접근할 수 없습니다(URP 버전 확인 필요).");
+            void Set(string name, object value)
+            {
+                var field = settings.GetType().GetField(name, Hidden) ?? throw new InvalidOperationException("SSAO 설정 항목이 없습니다: " + name);
+                field.SetValue(settings, field.FieldType.IsEnum ? Enum.ToObject(field.FieldType, value) : value);
+            }
+            // AOSampleOption and BlurQualityOptions are ordered High 0, Medium 1, Low 2.
+            var level = 2 - (int)next.effectQuality;
+            Set("Intensity", next.ssaoIntensity); Set("Radius", next.ssaoRadius); Set("DirectLightingStrength", .25f); Set("Falloff", 100f);
+            Set("Samples", level); Set("BlurQuality", level); Set("Downsample", next.effectQuality == MmdEffectQuality.Low);
+            // The models use lilToon or URP Unlit, which do not sample the SSAO texture: "after
+            // opaque" composites the occlusion onto the colour buffer for any shader.
+            Set("AfterOpaque", true);
+            // Normals reconstructed from depth: works for shaders without a DepthNormals pass.
+            Set("Source", 0); Set("NormalSamples", 1);
+            Ssao.SetActive(next.ssaoEnabled && next.ssaoIntensity > 0);
         }
         internal static int ShadowResolution(MmdShadowQuality quality) => ShadowResolutions[(int)quality];
         private void OnDestroy()
         {
             if (profile != null) Destroy(profile);
+#if UNITY_EDITOR
+            // Play mode in the editor edits the renderer asset itself: put the template values back.
+            if (Ssao != null && ssaoOriginal != null) UnityEditor.EditorJsonUtility.FromJsonOverwrite(ssaoOriginal, Ssao);
+#endif
         }
+#if UNITY_EDITOR
+        private string ssaoOriginal;
+        private void Awake() { var feature = FindSsao(); if (feature != null) ssaoOriginal = UnityEditor.EditorJsonUtility.ToJson(feature); }
+#endif
     }
 }
