@@ -129,7 +129,7 @@ namespace MmdStudio.Poc
             if (Error.Length > 0 || ProjectPath == null) { message = "복구하지 못했습니다. 자동 저장 파일은 남겨 두었습니다."; Refresh(); yield break; }
             // The recovered scene belongs to its original file (or none); it is not saved yet.
             ProjectPath = string.IsNullOrEmpty(info.originalPath) ? null : info.originalPath;
-            Dirty = true; NoteDirty(); recoveryOwned = true; recoveredVersion = dirtyVersion;
+            untrackedChange = true; UpdateDirtyFromHistory(); recoveryOwned = true; recoveredVersion = dirtyVersion;
             message = "자동 저장된 작업을 복구했습니다. 저장하면 원래 파일에 기록됩니다.";
             Refresh();
         }

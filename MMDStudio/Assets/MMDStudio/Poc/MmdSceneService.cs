@@ -294,8 +294,11 @@ namespace MmdStudio.Poc
             {
                 previous.ReleaseSceneClock(this);
                 previous.enabled = false;
-                Destroy(previous);
+                // H1-03: kept for undo when requested; the caller destroys it via DiscardMotion.
+                if (RetainReplacedMotions) LastReplacedMotion = (previous, item.MotionSource);
+                else Destroy(previous);
             }
+            else if (RetainReplacedMotions) LastReplacedMotion = (null, null);
             item.Motion = candidate;
             item.MotionSource = Path.GetFullPath(path);
             if (item.PhysicsEnabled) RebuildBake(item);
@@ -329,13 +332,77 @@ namespace MmdStudio.Poc
             {
                 previous.ReleaseSceneClock(this);
                 previous.enabled = false;
-                Destroy(previous);
+                // H1-03: kept for undo when requested; the caller destroys it via DiscardMotion.
+                if (RetainReplacedMotions) LastReplacedMotion = (previous, item.MotionSource);
+                else Destroy(previous);
             }
+            else if (RetainReplacedMotions) LastReplacedMotion = (null, null);
             item.Motion = candidate;
             item.MotionSource = Path.GetFullPath(path);
             if (item.PhysicsEnabled) RebuildBake(item);
             if (item.SpringPreset != null) RebuildSpring(item);
             Seek(Seconds);
+        }
+
+        // ----- H1-03 undo support -----
+        // When true, ReplaceMotion keeps the previous motion component (disabled) in
+        // LastReplacedMotion instead of destroying it.
+        public bool RetainReplacedMotions { get; set; }
+        internal (MmdPocMotion motion, string source) LastReplacedMotion { get; private set; }
+
+        // Takes an object out of the scene without releasing it (renderers hidden, clock released,
+        // bakes kept) so it can be put back. Returns its index in the scene list.
+        internal int Detach(string id)
+        {
+            var item = Find(id);
+            var index = objects.IndexOf(item);
+            objects.Remove(item);
+            if (item.Motion != null) item.Motion.ReleaseSceneClock(this);
+            foreach (var renderer in item.Model.root.GetComponentsInChildren<Renderer>(true)) renderer.enabled = false;
+            if (objects.Count == 0) { Playing = false; Seconds = 0; } else Seek(Seconds);
+            return index;
+        }
+
+        // Puts a detached object back at its index.
+        internal void Attach(SceneObject item, int index)
+        {
+            if (objects.Contains(item)) return;
+            objects.Insert(Mathf.Clamp(index, 0, objects.Count), item);
+            if (item.Motion != null) item.Motion.AcquireSceneClock(this);
+            foreach (var renderer in item.Model.root.GetComponentsInChildren<Renderer>(true)) renderer.enabled = item.Visible;
+            settleThroughFrame = Time.frameCount + 1;
+            Seek(Seconds);
+        }
+
+        // Releases a detached object's resources for good.
+        internal void ReleaseDetached(SceneObject item)
+        {
+            if (objects.Contains(item)) return;
+            item.Bake = null; item.SpringBake = null;
+            if (item.Owner != null) item.Owner.Release();
+        }
+
+        // Swaps a character's motion component (undo/redo of a VMD connection). Returns the
+        // previous one, disabled and released from the clock, for the caller to keep.
+        internal MmdPocMotion SwapMotion(string id, MmdPocMotion motion, string source)
+        {
+            var item = Find(id);
+            var previous = item.Motion;
+            if (previous != null) { previous.ReleaseSceneClock(this); previous.enabled = false; }
+            item.Motion = motion; item.MotionSource = motion == null ? null : source;
+            if (motion != null) { motion.enabled = true; motion.AcquireSceneClock(this); }
+            else item.Model.mmdTransformResult.transformManager.ResetToBindPose();
+            if (item.PhysicsEnabled && motion != null) RebuildBake(item); else if (motion == null) { item.Bake = null; item.PhysicsEnabled = false; }
+            if (item.SpringPreset != null && motion != null) RebuildSpring(item); else if (motion == null) { item.SpringBake = null; item.SpringPreset = null; }
+            Seek(Seconds);
+            return previous;
+        }
+
+        internal void DiscardMotion(MmdPocMotion motion)
+        {
+            if (motion == null) return;
+            foreach (var item in objects) if (item.Motion == motion) return; // still in use
+            motion.enabled = false; Destroy(motion);
         }
 
         public void Remove(string id)

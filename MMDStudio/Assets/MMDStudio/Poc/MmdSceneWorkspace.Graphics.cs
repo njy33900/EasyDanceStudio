@@ -79,18 +79,18 @@ namespace MmdStudio.Poc
         {
             Guard(() =>
             {
-                var next = Graphics.Settings; change(next); Graphics.Apply(next); MarkDirty();
+                Record("그래픽", null, () => { var next = Graphics.Settings; change(next); Graphics.Apply(next); }, coalesce: true);
             });
         }
         // Whole-state apply used by future persistence; refreshes the controls.
-        internal void ApplyGraphics(SceneGraphicsSettings settings) => Guard(() => { Graphics.Apply(settings); MarkDirty(); });
+        internal void ApplyGraphics(SceneGraphicsSettings settings) => Guard(() => Record("그래픽", null, () => Graphics.Apply(settings)));
         private void SaveView()
         {
             var next = Graphics.Settings;
             if (next.savedViews.Count >= SceneGraphicsSettings.MaxSavedViews) throw new InvalidOperationException("시점은 최대 " + SceneGraphicsSettings.MaxSavedViews + "개까지 저장할 수 있습니다.");
             savedViewCounter = Math.Max(savedViewCounter, next.savedViews.Count) + 1;
             next.savedViews.Add(new SavedView { name = "시점 " + savedViewCounter, pivot = View.Pivot, yaw = View.Yaw, pitch = View.Pitch, distance = View.Distance, fieldOfView = Camera.main.fieldOfView });
-            Graphics.Apply(next); MarkDirty(); message = "현재 시점을 저장했습니다.";
+            Record("시점 저장", null, () => Graphics.Apply(next)); message = "현재 시점을 저장했습니다.";
         }
         internal void RestoreView(int index)
         {
@@ -105,7 +105,7 @@ namespace MmdStudio.Poc
         {
             var next = Graphics.Settings;
             if (index < 0 || index >= next.savedViews.Count) return;
-            next.savedViews.RemoveAt(index); Graphics.Apply(next); MarkDirty(); message = "저장된 시점을 삭제했습니다.";
+            next.savedViews.RemoveAt(index); Record("시점 삭제", null, () => Graphics.Apply(next)); message = "저장된 시점을 삭제했습니다.";
         }
         private void ResetView()
         {

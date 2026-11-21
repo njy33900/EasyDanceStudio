@@ -131,6 +131,7 @@ namespace MmdStudio.Poc
         {
             var handle = GizmoHandleAt(screen);
             if (handle < 0 || !GizmoFrame(out var origin, out var length)) return false;
+            gizmoBefore = CaptureLight();
             var item = GizmoTarget; var camera = Camera.main;
             DragHandle = handle; dragStartMouse = dragLastMouse = screen; dragWorldLength = length; dragAngle = 0;
             dragStartPosition = item.Placement.localPosition; dragStartRotation = item.Placement.localRotation; dragStartScale = item.Placement.localScale;
@@ -173,7 +174,7 @@ namespace MmdStudio.Poc
             try
             {
                 Scene.SetPlacement(item.Id, position, rotation.eulerAngles, scale);
-                MarkDirty(); Error = "";
+                Dirty = true; Error = ""; // recorded as one command when the drag ends
             }
             catch (Exception ex) { Error = ex.Message; DragHandle = -1; }
             RefreshTransformFields();
@@ -184,6 +185,15 @@ namespace MmdStudio.Poc
             if (DragHandle < 0) return;
             DragHandle = -1;
             var item = GizmoTarget;
+            // H1-03: one drag is one command.
+            if (gizmoBefore != null)
+            {
+                var after = CaptureLight();
+                if (!Same(gizmoBefore, after))
+                    Push(new StateCommand { Label = Gizmo == GizmoMode.Move ? "이동" : Gizmo == GizmoMode.Rotate ? "회전" : "크기", ObjectId = item?.Id, Before = gizmoBefore, After = after });
+                else UpdateDirtyFromHistory();
+                gizmoBefore = null;
+            }
             if (item != null) message = (Gizmo == GizmoMode.Move ? "이동" : Gizmo == GizmoMode.Rotate ? "회전" : "크기") + ": " + System.IO.Path.GetFileNameWithoutExtension(item.ModelSource);
             Refresh();
         }

@@ -629,6 +629,66 @@ namespace MmdStudio.Poc
                 if (ui.Error.Length > 0 || a == null || a.PhysicsEnabled) throw new InvalidOperationException("main scene reopen failed: " + ui.Error);
             }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+
+            // H1-03: undo/redo through Ctrl+Z / Ctrl+Y (viewport shortcuts).
+            void UndoKey() => ui.ProcessViewportInput(new Vector2(-10, -10), Vector2.zero, 0, false, false, false, undoKey: true);
+            void RedoKey() => ui.ProcessViewportInput(new Vector2(-10, -10), Vector2.zero, 0, false, false, false, redoKey: true);
+            MmdPocMotion motionBefore = null; string motionSourceBefore = null;
+            try
+            {
+                var startPosition = a.Placement.localPosition;
+                Activate(ui.Root, "object-" + a.Id);
+                ui.Root.Q<Vector3Field>("Position").value = startPosition + new Vector3(1, 0, 0);
+                Activate(ui.Root, "object-" + stage.Id);
+                ui.Root.Q<Toggle>("Visible").value = false;
+                var recorded = ui.UndoCount == 2 && ui.Dirty;
+                UndoKey();
+                var visibleBack = stage.Visible && a.Placement.localPosition == startPosition + new Vector3(1, 0, 0);
+                UndoKey();
+                var allBack = a.Placement.localPosition == startPosition && !ui.Dirty && ui.RedoCount == 2;
+                RedoKey(); RedoKey();
+                var redone = !stage.Visible && a.Placement.localPosition == startPosition + new Vector3(1, 0, 0) && ui.Dirty;
+                UndoKey(); UndoKey();
+                Check("undo_redo_placement_and_visibility_back_to_saved", recorded && visibleBack && allBack && redone &&
+                    stage.Visible && a.Placement.localPosition == startPosition && !ui.Dirty);
+
+                Activate(ui.Root, "object-" + stage.Id);
+                Activate(ui.Root, "RemoveModel");
+                Activate(ui.Root, "ConfirmRemove");
+                var removedNow = ui.Scene.Objects.Count == 2 && !ui.Scene.Objects.Contains(stage);
+                UndoKey();
+                var restored = ui.Scene.Objects.Count == 3 && ui.Scene.Objects.Contains(stage) && stage.Model.root != null &&
+                    stage.Model.root.GetComponentsInChildren<Renderer>().All(r => r.enabled) && ui.SelectedId == stage.Id && !ui.Dirty;
+                RedoKey();
+                var removedAgain = !ui.Scene.Objects.Contains(stage);
+                UndoKey();
+                Check("undo_remove_restores_the_same_object_instantly", removedNow && restored && removedAgain && ui.Scene.Objects.Contains(stage) && !ui.Dirty);
+
+                Activate(ui.Root, "object-" + a.Id);
+                motionBefore = a.Motion; motionSourceBefore = a.MotionSource;
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return ui.ApplyPickerResult(bMotion, false);
+            try
+            {
+                var connected = a.Motion != motionBefore && a.MotionSource == Path.GetFullPath(bMotion) && ui.UndoLabel == "VMD 연결";
+                UndoKey();
+                var previousBack = a.Motion == motionBefore && a.MotionSource == motionSourceBefore && a.Motion.enabled && !ui.Dirty;
+                RedoKey();
+                var nextBack = a.MotionSource == Path.GetFullPath(bMotion);
+                UndoKey();
+                Check("undo_vmd_connection_restores_previous_motion", connected && previousBack && nextBack && a.Motion == motionBefore && !ui.Dirty);
+
+                // History limit: 204 loop toggles keep only the last 200 commands.
+                var loopBefore = ui.Scene.Loop;
+                for (var i = 0; i < MmdSceneWorkspace.UndoLimit + 4; i++) ui.Root.Q<Toggle>("Loop").value = !ui.Scene.Loop;
+                var capped = ui.UndoCount == MmdSceneWorkspace.UndoLimit;
+                for (var i = 0; i < MmdSceneWorkspace.UndoLimit; i++) UndoKey();
+                Check("undo_history_keeps_last_200_commands", capped && ui.UndoCount == 0 && ui.RedoCount == MmdSceneWorkspace.UndoLimit &&
+                    ui.Scene.Loop == loopBefore && ui.Dirty); // the saved state fell off the history, so it stays unsaved
+                if (!ui.SaveTo(sceneFile)) throw new InvalidOperationException("save after undo checks failed: " + ui.Error);
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
             yield return ui.OpenFrom(Path.Combine(project, "corrupt.mmdscene"));
             try
             {

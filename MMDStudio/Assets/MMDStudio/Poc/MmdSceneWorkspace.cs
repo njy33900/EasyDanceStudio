@@ -65,6 +65,7 @@ namespace MmdStudio.Poc
         public void Initialize()
         {
             Scene = gameObject.AddComponent<MmdSceneService>();
+            Scene.RetainReplacedMotions = true; // H1-03: a replaced VMD stays available for undo
             Graphics = gameObject.AddComponent<MmdSceneGraphics>();
             Graphics.Initialize(Camera.main);
             if (UnityEngine.EventSystems.EventSystem.current == null)
@@ -151,7 +152,7 @@ namespace MmdStudio.Poc
             rotation.RegisterValueChangedCallback(_ => ApplyPlacement());
             scale.RegisterValueChangedCallback(_ => ApplyPlacement());
             visible = new Toggle("표시") { name = "Visible" }; transformSection.Add(visible);
-            visible.RegisterValueChangedCallback(evt => Guard(() => { if (Selected != null) { Scene.SetVisible(SelectedId, evt.newValue); MarkDirty(); } }));
+            visible.RegisterValueChangedCallback(evt => Guard(() => { if (Selected != null) { var id = SelectedId; Record("표시 전환", id, () => Scene.SetVisible(id, evt.newValue)); } }));
             var objectButtons = Element(transformSection, "eds-row-buttons");
             TextButton(objectButtons, "FrameSelected", "선택 보기", () => Guard(FrameSelected), "eds-button--block").style.marginRight = 6;
             remove = TextButton(objectButtons, "RemoveModel", "삭제", RequestRemove, "eds-button--block", "eds-button--danger");
@@ -161,20 +162,20 @@ namespace MmdStudio.Poc
             connect = TextButton(motionSection, "ConnectMotion", "VMD 연결", () => Pick(PickKind.Motion), "eds-button--block");
             // PH-03: experimental per-character physics, baked ahead of playback.
             physics = new Toggle("물리 (실험)") { name = "Physics" }; motionSection.Add(physics);
-            physics.RegisterValueChangedCallback(evt => Guard(() => { if (Selected != null) { Scene.SetPhysics(SelectedId, evt.newValue); MarkDirty(); RefreshPhysicsInfo(); } }));
+            physics.RegisterValueChangedCallback(evt => Guard(() => { if (Selected != null) { var id = SelectedId; Record("물리 켜기/끄기", id, () => Scene.SetPhysics(id, evt.newValue)); RefreshPhysicsInfo(); } }));
             physicsInfo = Text(motionSection, "", "eds-note"); physicsInfo.name = "PhysicsInfo";
             // PH-04: per-part strength sliders for the parts the selected model has.
             physicsParts = new VisualElement { name = "PhysicsParts" }; motionSection.Add(physicsParts);
             // PH-05: chest/hip spring bones for models that have the bones but no rigid bodies.
             springPreset = new DropdownField("신체 흔들림", SpringChoices, 0) { name = "SpringPreset" }; motionSection.Add(springPreset);
-            springPreset.RegisterValueChangedCallback(evt => Guard(() => { if (Selected != null) { Scene.SetSpring(SelectedId, SpringIdOf(evt.newValue)); MarkDirty(); RefreshPhysicsInfo(); } }));
+            springPreset.RegisterValueChangedCallback(evt => Guard(() => { if (Selected != null) { var id = SelectedId; Record("신체 흔들림", id, () => Scene.SetSpring(id, SpringIdOf(evt.newValue))); RefreshPhysicsInfo(); } }));
             springInfo = Text(motionSection, "", "eds-note"); springInfo.name = "SpringInfo";
             springAll = TextButton(motionSection, "SpringApplyAll", "모든 캐릭터에 적용", () => Guard(() =>
             {
                 var id = SpringIdOf(springPreset.value) ?? "medium";
-                var count = Scene.ApplySpringToAll(id);
+                var count = 0;
+                Record("신체 흔들림 일괄 적용", null, () => count = Scene.ApplySpringToAll(id));
                 message = "신체 흔들림(" + MmdSpringBones.PresetLabels[id] + ")을 캐릭터 " + count + "명에게 적용했습니다. 모델 이용 규약을 확인하세요.";
-                MarkDirty();
             }), "eds-button--block");
 
             materialSection = Section(content, "MaterialSection", "재질");
@@ -194,9 +195,9 @@ namespace MmdStudio.Poc
             time = Text(playback, "", "eds-time"); time.name = "Time";
             var options = Element(playback, "eds-playback-options");
             loop = new Toggle("반복") { name = "Loop" }; loop.AddToClassList("eds-loop"); options.Add(loop);
-            loop.RegisterValueChangedCallback(evt => Guard(() => { Scene.Loop = evt.newValue; MarkDirty(); }));
+            loop.RegisterValueChangedCallback(evt => Guard(() => Record("반복", null, () => Scene.Loop = evt.newValue)));
             speed = new Slider("속도", .5f, 2) { name = "Speed" }; speed.AddToClassList("eds-speed"); speed.SetValueWithoutNotify(1); options.Add(speed);
-            speed.RegisterValueChangedCallback(evt => Guard(() => { Scene.Speed = evt.newValue; MarkDirty(); }));
+            speed.RegisterValueChangedCallback(evt => Guard(() => Record("재생 속도", null, () => Scene.Speed = evt.newValue, coalesce: true)));
             speedValue = Text(options, "1.0×", "eds-speed-value");
             HideButton(playback, "HidePlaybackBar", "PlaybackBar");
 
@@ -324,18 +325,26 @@ namespace MmdStudio.Poc
                 if (kind == PickKind.Character)
                 {
                     var item = importTask.GetAwaiter().GetResult();
-                    SelectedId = item.Id; MarkDirty(); message = "캐릭터를 추가했습니다. VMD를 연결하세요."; FrameAll();
+                    SelectedId = item.Id; Push(new AddCommand { Label = "캐릭터 추가", ObjectId = item.Id, Item = item, Index = Scene.Objects.ToList().IndexOf(item) });
+                    message = "캐릭터를 추가했습니다. VMD를 연결하세요."; FrameAll();
                 }
                 else if (kind == PickKind.Stage)
                 {
                     var item = importTask.GetAwaiter().GetResult();
-                    SelectedId = item.Id; MarkDirty(); message = "배경을 추가했습니다. 배경은 모션 없이 고정됩니다."; FrameAll();
+                    SelectedId = item.Id; Push(new AddCommand { Label = "배경 추가", ObjectId = item.Id, Item = item, Index = Scene.Objects.ToList().IndexOf(item) });
+                    message = "배경을 추가했습니다. 배경은 모션 없이 고정됩니다."; FrameAll();
                 }
                 else
                 {
                     if (Selected == null) throw new InvalidOperationException("캐릭터를 먼저 선택하세요.");
                     if (Selected.Kind != MmdSceneService.ObjectKind.Character) throw new InvalidOperationException("배경에는 VMD를 연결할 수 없습니다. 캐릭터를 선택하세요.");
-                    motionTask.GetAwaiter().GetResult(); ForgetUnresolvedMotion(SelectedId); MarkDirty(); message = "선택한 캐릭터에 VMD를 연결했습니다.";
+                    motionTask.GetAwaiter().GetResult();
+                    unresolvedMotions.TryGetValue(SelectedId, out var missingBefore);
+                    ForgetUnresolvedMotion(SelectedId);
+                    var replaced = Scene.LastReplacedMotion;
+                    Push(new MotionCommand { Label = "VMD 연결", ObjectId = SelectedId, Previous = replaced.motion, PreviousSource = replaced.source,
+                        Next = Selected.Motion, NextSource = Selected.MotionSource, PreviousMissing = missingBefore });
+                    message = "선택한 캐릭터에 VMD를 연결했습니다.";
                 }
             }
             catch (OperationCanceledException) { Error = ""; message = "불러오기를 취소했습니다."; }
@@ -350,7 +359,7 @@ namespace MmdStudio.Poc
         }
         private void ApplyPlacement()
         {
-            Guard(() => { if (Selected != null) { Scene.SetPlacement(SelectedId, position.value, rotation.value, scale.value); MarkDirty(); } });
+            Guard(() => { if (Selected != null) { var id = SelectedId; Record("변형", id, () => Scene.SetPlacement(id, position.value, rotation.value, scale.value), coalesce: true); } });
         }
         private void Guard(Action action)
         {
@@ -408,7 +417,8 @@ namespace MmdStudio.Poc
         // ignored and a viewport press only commits the field. While the delete dialog is
         // open only Esc is handled (its full-screen overlay also blocks pointer input).
         internal void ProcessViewportInput(Vector2 screen, Vector2 delta, float scrollNotches, bool orbitHeld, bool panHeld, bool frameKey,
-            bool leftHeld = false, bool playKey = false, bool deleteKey = false, bool cancelKey = false, bool saveKey = false, int gizmoKey = 0, bool focusKey = false)
+            bool leftHeld = false, bool playKey = false, bool deleteKey = false, bool cancelKey = false, bool saveKey = false, int gizmoKey = 0, bool focusKey = false,
+            bool undoKey = false, bool redoKey = false)
         {
             var pressed = (orbitHeld && !orbitWasHeld) || (panHeld && !panWasHeld);
             var leftPressed = leftHeld && !leftWasHeld; var leftReleased = !leftHeld && leftWasHeld;
@@ -461,6 +471,8 @@ namespace MmdStudio.Poc
                 if (playKey && Scene.Duration > 0) Guard(() => Scene.Playing = !Scene.Playing);
                 if (deleteKey && (Selected != null || SelectedUnresolved != null)) RequestRemove();
                 if (saveKey) Guard(() => Save());
+                if (undoKey) Guard(Undo);
+                if (redoKey) Guard(Redo);
                 if (gizmoKey >= 1 && gizmoKey <= 3) SetGizmoMode((GizmoMode)(gizmoKey - 1));
             }
             View.Apply(camera);
@@ -585,7 +597,9 @@ namespace MmdStudio.Poc
                 }
                 var item = Scene.Objects.FirstOrDefault(value => value.Id == id);
                 if (item == null) return;
-                Scene.Remove(id); ForgetUnresolvedMotion(id); MarkDirty();
+                unresolvedMotions.TryGetValue(id, out var missingMotion);
+                var removeCommand = new RemoveCommand { Label = item.Kind == MmdSceneService.ObjectKind.Stage ? "배경 삭제" : "캐릭터 삭제", ObjectId = id, Item = item, Motion = missingMotion };
+                removeCommand.Redo(this); Push(removeCommand);
                 if (SelectedId == id) SelectedId = Scene.Objects.FirstOrDefault()?.Id;
                 message = item.Kind == MmdSceneService.ObjectKind.Stage ? "선택한 배경을 삭제했습니다." : "선택한 캐릭터를 삭제했습니다.";
             });
@@ -606,7 +620,9 @@ namespace MmdStudio.Poc
                 mouse.leftButton.isPressed, Pressed(keyboard?.spaceKey), Pressed(keyboard?.deleteKey), Pressed(keyboard?.escapeKey),
                 keyboard != null && keyboard.ctrlKey.isPressed && keyboard.sKey.wasPressedThisFrame,
                 keyboard == null || keyboard.ctrlKey.isPressed ? 0 : keyboard.wKey.wasPressedThisFrame ? 1 : keyboard.eKey.wasPressedThisFrame ? 2 : keyboard.rKey.wasPressedThisFrame ? 3 : 0,
-                keyboard != null && !keyboard.ctrlKey.isPressed && keyboard.hKey.wasPressedThisFrame);
+                keyboard != null && !keyboard.ctrlKey.isPressed && keyboard.hKey.wasPressedThisFrame,
+                keyboard != null && keyboard.ctrlKey.isPressed && !keyboard.shiftKey.isPressed && keyboard.zKey.wasPressedThisFrame,
+                keyboard != null && keyboard.ctrlKey.isPressed && (keyboard.yKey.wasPressedThisFrame || (keyboard.shiftKey.isPressed && keyboard.zKey.wasPressedThisFrame)));
         }
 
         private void CreateHighlight()
@@ -808,7 +824,7 @@ namespace MmdStudio.Poc
                     var id = selected.Id; var name = part;
                     var slider = new Slider(MmdPhysicsParts.Labels[part] + " 물리", 0, 100) { name = "PhysicsStrength-" + part, showInputField = true };
                     slider.SetValueWithoutNotify(selected.StrengthOf(part) * 100);
-                    slider.RegisterValueChangedCallback(evt => Guard(() => { Scene.SetPhysicsStrength(id, name, Mathf.Round(evt.newValue) / 100f); MarkDirty(); }));
+                    slider.RegisterValueChangedCallback(evt => Guard(() => Record("물리 강도", id, () => Scene.SetPhysicsStrength(id, name, Mathf.Round(evt.newValue) / 100f), coalesce: true)));
                     physicsParts.Add(slider);
                 }
                 Show(physicsParts, parts.Length > 0);

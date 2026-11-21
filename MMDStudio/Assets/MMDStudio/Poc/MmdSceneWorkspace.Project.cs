@@ -23,7 +23,8 @@ namespace MmdStudio.Poc
         private bool quitConfirmed;
         private string projectId;
 
-        private void MarkDirty() { Dirty = true; NoteDirty(); }
+        // A change outside the undo history (H1-03 records user edits through Record/Push).
+        private void MarkDirty() { untrackedChange = true; UpdateDirtyFromHistory(); }
 
         // ----- R0-02a: unresolved references are part of the document -----
         // A scene entry whose PMX is missing or fails to load is kept verbatim (ID, type, stored
@@ -82,8 +83,9 @@ namespace MmdStudio.Poc
         private void ForgetUnresolvedMotion(string id) => unresolvedMotions.Remove(id);
         private bool RemoveUnresolved(string id)
         {
-            if (!unresolved.Remove(id)) return false;
-            documentOrder.Remove(id); MarkDirty();
+            if (!unresolved.TryGetValue(id, out var item)) return false;
+            var command = new RemoveMissingCommand { Label = "누락 항목 삭제", ObjectId = id, Item = item, OrderIndex = documentOrder.IndexOf(id) };
+            command.Redo(this); Push(command);
             return true;
         }
 
@@ -100,13 +102,18 @@ namespace MmdStudio.Poc
             }));
             IconButton(toolbar, "SaveScene", MmdIconKind.Save, "저장 (Ctrl+S)", () => Guard(() => Save()));
             IconButton(toolbar, "SaveSceneAs", MmdIconKind.SaveAs, "다른 이름으로 저장", () => Guard(() => SaveAs()));
+            undoButton = IconButton(toolbar, "Undo", MmdIconKind.Undo, "실행 취소 (Ctrl+Z)", () => Guard(Undo));
+            redoButton = IconButton(toolbar, "Redo", MmdIconKind.Redo, "다시 실행 (Ctrl+Y)", () => Guard(Redo));
         }
         private void UpdateTitle()
         {
             if (titleLabel == null) return;
             var name = ProjectPath == null ? "새 장면" : Path.GetFileName(ProjectPath);
             titleLabel.text = name + (Dirty ? " *" : "");
+            undoButton?.SetEnabled(!Busy && UndoCount > 0);
+            redoButton?.SetEnabled(!Busy && RedoCount > 0);
         }
+        private Button undoButton, redoButton;
 
         // ----- Save -----
         // Returns true when the scene was written (false when the save dialog was cancelled).
@@ -126,7 +133,7 @@ namespace MmdStudio.Poc
             if (!string.Equals(Path.GetExtension(full), MmdSceneDocument.Extension, StringComparison.OrdinalIgnoreCase)) full += MmdSceneDocument.Extension;
             MmdSceneDocument.Write(full, Capture(full));
             RebaseUnresolved(full);
-            ProjectPath = full; Dirty = false; Error = "";
+            ProjectPath = full; MarkSaved(); Error = "";
             message = "저장했습니다: " + Path.GetFileName(full);
             Refresh();
             return true;
@@ -187,6 +194,7 @@ namespace MmdStudio.Poc
             Scene.Clear(); Scene.Loop = false; Scene.Speed = 1; ClearDocumentState();
             Graphics.Apply(new SceneGraphicsSettings());
             View.Reset(); View.Apply(Camera.main);
+            ClearHistory();
             SelectedId = null; ProjectPath = null; projectId = null; Dirty = false; Error = "";
             message = "새 장면을 시작했습니다.";
             Refresh();
@@ -306,6 +314,7 @@ namespace MmdStudio.Poc
                     SelectedId = file.selectedId != null && (Scene.Objects.Any(item => item.Id == file.selectedId) || unresolved.ContainsKey(file.selectedId))
                         ? file.selectedId : Scene.Objects.FirstOrDefault()?.Id;
                     Target = InspectorTarget.Object;
+                    ClearHistory();
                     ProjectPath = full; projectId = file.projectId; Dirty = false;
                     message = "장면을 불러왔습니다: " + Path.GetFileName(path);
                     LastLoadProblems = problems.ToArray();
