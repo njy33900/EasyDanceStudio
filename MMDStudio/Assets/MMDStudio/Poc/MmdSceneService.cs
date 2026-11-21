@@ -56,6 +56,11 @@ namespace MmdStudio.Poc
             public bool SpringReady => SpringBake != null && !SpringStale && SpringBake.Complete;
             public float SpringProgress => SpringBake == null || SpringStale ? 0 : SpringBake.Progress;
             // Parts with a strength slider: physics parts plus spring parts.
+            // H2b-01: material style (scene override; the PMX materials are kept for "원본").
+            public MaterialStyleData MaterialStyle { get; internal set; } = new MaterialStyleData();
+            internal MmdMaterialStyler Styler { get; set; }
+            internal MmdMaterialStyler StylerOrCreate => Styler ?? (Styler = new MmdMaterialStyler(Model));
+            public string[] MaterialWarnings => StylerOrCreate.Warnings(MaterialStyle.style);
             public string[] MotionParts => (Bake == null ? new string[0] : Bake.Parts)
                 .Union(SpringBake == null ? new string[0] : SpringBake.Parts)
                 .OrderBy(p => Array.IndexOf(MmdPhysicsParts.Order, p)).ToArray();
@@ -401,6 +406,7 @@ namespace MmdStudio.Poc
         {
             if (objects.Contains(item)) return;
             item.Bake = null; item.SpringBake = null;
+            item.Styler?.Dispose(); item.Styler = null;
             if (item.Owner != null) item.Owner.Release();
         }
 
@@ -432,6 +438,7 @@ namespace MmdStudio.Poc
             var item = Find(id);
             objects.Remove(item);
             item.Bake = null; item.SpringBake = null;
+            item.Styler?.Dispose(); item.Styler = null;
             if (item.Motion != null) item.Motion.ReleaseSceneClock(this);
             item.Owner.Release();
             if (Duration <= 0) { Playing = false; Seconds = 0; }
@@ -518,6 +525,17 @@ namespace MmdStudio.Poc
                 .ToList();
             item.SpringBake = new MmdSpringBake(item.Motion, item.Model, this, candidates, item.SpringPreset);
             foreach (var entry in item.PhysicsStrength) item.SpringBake.SetStrength(entry.Key, entry.Value);
+        }
+
+        // H2b-01: material style of one object (toon for any object, PBR for backgrounds only).
+        public void SetMaterialStyle(string id, MaterialStyleData data)
+        {
+            if (data == null) throw new ArgumentNullException(nameof(data));
+            var next = data.Clone(); next.Validate();
+            var item = Find(id);
+            if (next.style == MaterialStyleData.Pbr && item.Kind != ObjectKind.Stage) throw new InvalidOperationException("PBR 재질은 배경에만 쓸 수 있습니다.");
+            if (next.style != MaterialStyleData.Original || item.Styler != null) item.StylerOrCreate.Apply(next);
+            item.MaterialStyle = next;
         }
 
         // PH-04: strength of one physics part for a character (0..1). Instant, no re-bake.
@@ -631,6 +649,7 @@ namespace MmdStudio.Poc
             foreach (var item in objects)
             {
                 item.Bake = null; item.SpringBake = null;
+                item.Styler?.Dispose(); item.Styler = null;
                 if (item.Motion != null) item.Motion.ReleaseSceneClock(this);
                 if (item.Owner != null) item.Owner.Release();
             }

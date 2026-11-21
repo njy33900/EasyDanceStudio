@@ -62,6 +62,8 @@ namespace MmdStudio.Poc
         public bool visible = true;
         // Schema 2: physics (PH-03), per-part strength (PH-04) and chest/hip spring (PH-05).
         public PhysicsData physics = new PhysicsData();
+        // H2b-01 (additive in schema 2): material style override.
+        public MaterialStyleData material = new MaterialStyleData();
     }
 
     [Serializable]
@@ -215,6 +217,11 @@ namespace MmdStudio.Poc
                     throw new InvalidDataException("신체 흔들림 설정이 올바르지 않습니다: " + item.physics.spring);
                 if (item.type == SceneObjectData.StageType && (item.physics.enabled || !string.IsNullOrEmpty(item.physics.spring)))
                     throw new InvalidDataException("배경에는 물리·신체 흔들림을 지정할 수 없습니다.");
+                if (item.material == null) item.material = new MaterialStyleData();
+                try { item.material.Validate(); }
+                catch (ArgumentException ex) { throw new InvalidDataException("재질 스타일 설정이 올바르지 않습니다: " + ex.Message, ex); }
+                if (item.material.style == MaterialStyleData.Pbr && item.type != SceneObjectData.StageType)
+                    throw new InvalidDataException("PBR 재질은 배경에만 쓸 수 있습니다.");
             }
             if (scene.view == null || !Finite(scene.view.pivot.x) || !Finite(scene.view.pivot.y) || !Finite(scene.view.pivot.z) ||
                 !Finite(scene.view.yaw) || !Finite(scene.view.pitch) || !Finite(scene.view.distance)) throw new InvalidDataException("시점 값이 올바르지 않습니다.");

@@ -174,6 +174,7 @@ namespace MmdStudio.Poc
                         enabled = item.PhysicsEnabled, spring = item.SpringPreset ?? "",
                         strength = item.PhysicsStrength.Select(entry => new PartStrength { part = entry.Key, value = entry.Value }).ToList(),
                     },
+                    material = item.MaterialStyle.Clone(),
                 };
             }
             SceneObjectData Missing(UnresolvedItem item)
@@ -339,6 +340,7 @@ namespace MmdStudio.Poc
                             Scene.SetPhysicsStrength(live.Id, entry.part, Mathf.Clamp01(entry.value));
                         if (physics.enabled && live.Motion != null) Scene.SetPhysics(live.Id, true);
                         if (!string.IsNullOrEmpty(physics.spring) && live.Motion != null && live.SpringAvailable) Scene.SetSpring(live.Id, physics.spring);
+                        if (data.material != null && data.material.style != MaterialStyleData.Original) ApplyStoredMaterial(live.Id, data.material, problems);
                     }
                     Graphics.Apply(file.graphics);
                     View.Set(file.view.pivot, file.view.yaw, file.view.pitch, file.view.distance); View.Apply(Camera.main);

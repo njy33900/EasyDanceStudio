@@ -13,6 +13,8 @@ namespace MmdStudio.Poc
     {
         public string name;
         public SceneGraphicsSettings values = new SceneGraphicsSettings();
+        // H2b-01: style the preset gives every character ("" leaves materials as they are).
+        public string characterStyle = "";
         [NonSerialized] public bool builtIn;
     }
 
@@ -23,21 +25,21 @@ namespace MmdStudio.Poc
         // Proposed defaults; the reference images are to be confirmed with the user (decision pending).
         public static readonly LookPreset[] BuiltIn =
         {
-            new LookPreset { name = "밝은 무대", builtIn = true, values = new SceneGraphicsSettings
+            new LookPreset { name = "밝은 무대", builtIn = true, characterStyle = MaterialStyleData.Toon, values = new SceneGraphicsSettings
             {
                 lightColor = new Color(1, .98f, .95f), lightIntensity = 2.4f, lightYaw = -30, lightPitch = 45, shadowQuality = MmdShadowQuality.Medium,
                 bloomEnabled = true, bloomIntensity = .6f, tonemapping = true, exposure = .2f, contrast = 10, saturation = 5,
                 backgroundColor = new Color(.93f, .94f, .96f), ssaoEnabled = true, ssaoIntensity = .8f, ssaoRadius = .3f,
                 vignetteEnabled = false, vignetteIntensity = .2f, dofEnabled = false, dofStrength = .3f,
             } },
-            new LookPreset { name = "저녁 실외", builtIn = true, values = new SceneGraphicsSettings
+            new LookPreset { name = "저녁 실외", builtIn = true, characterStyle = MaterialStyleData.Toon, values = new SceneGraphicsSettings
             {
                 lightColor = new Color(1, .72f, .5f), lightIntensity = 1.8f, lightYaw = 60, lightPitch = 12, shadowQuality = MmdShadowQuality.High,
                 bloomEnabled = true, bloomIntensity = 1.2f, tonemapping = true, exposure = 0, contrast = 15, saturation = 10,
                 backgroundColor = new Color(.55f, .42f, .5f), ssaoEnabled = true, ssaoIntensity = .7f, ssaoRadius = .4f,
                 vignetteEnabled = true, vignetteIntensity = .25f, dofEnabled = true, dofStrength = .35f,
             } },
-            new LookPreset { name = "어두운 클럽", builtIn = true, values = new SceneGraphicsSettings
+            new LookPreset { name = "어두운 클럽", builtIn = true, characterStyle = MaterialStyleData.Toon, values = new SceneGraphicsSettings
             {
                 lightColor = new Color(.75f, .55f, 1), lightIntensity = 2.2f, lightYaw = 150, lightPitch = 60, shadowQuality = MmdShadowQuality.Medium,
                 bloomEnabled = true, bloomIntensity = 2.5f, tonemapping = true, exposure = -.3f, contrast = 25, saturation = 20,

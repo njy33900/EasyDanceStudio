@@ -174,7 +174,7 @@ namespace MmdStudio.Poc
 
             materialSection = Section(content, "MaterialSection", "재질");
             materialInfo = Text(materialSection, "", "eds-section-text"); materialInfo.name = "MaterialInfo";
-            Text(materialSection, "재질 편집(툰·PBR)은 2차 예정입니다.", "eds-note");
+            BuildMaterialControls(materialSection);
 
             BuildLookSection(content);
             BuildAudioSection(content);
@@ -349,6 +349,7 @@ namespace MmdStudio.Poc
             RefreshGraphics();
             RefreshAudio();
             RefreshLook();
+            RefreshMaterial();
             RefreshCameraMotion();
             RefreshGizmo();
         }

@@ -264,6 +264,7 @@ namespace MmdStudio.Poc
                 PickingChecks(ui, a, b, stage);
                 GizmoChecks(ui, a);
                 GraphicsChecks(ui);
+                MaterialChecks(ui, a, b, stage, reportDirectory);
             }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
 
@@ -1017,8 +1018,11 @@ namespace MmdStudio.Poc
             const int rate = 44100; const double length = 3.0;
             var dialogs = new ScriptedDialogs(); var native = ui.FileDialogs;
             MmdAudioTrack track = null; AudioSource source = null;
+            yield return null; // Destroy is deferred to the end of the frame
             try
             {
+                // H2b-01: the new, empty scene holds no toon/PBR materials (released with their objects).
+                Check("styled_materials_released_with_their_objects [" + StyledMaterialCount() + " left]", StyledMaterialCount() == 0);
                 if (Directory.Exists(dir)) Directory.Delete(dir, true);
                 Directory.CreateDirectory(dir);
                 var pattern = new[] { -1f, -.5f, 0, .25f, .5f, .99f };
@@ -1436,6 +1440,140 @@ namespace MmdStudio.Poc
             public DisposableCamera(MmdPocCamera value) { Value = value; }
             public void Dispose() => Value?.Dispose();
         }
+        // ----- H2b-01 material styles -----
+        private static int StyledMaterialCount() => Resources.FindObjectsOfTypeAll<Material>()
+            .Count(m => m != null && m.shader != null && (m.shader.name == "EasyDanceStudio/Toon" || m.shader.name == "EasyDanceStudio/StageLit"));
+        private static Material[] MaterialsOf(MmdSceneService.SceneObject item) =>
+            item.Model.root.GetComponentsInChildren<Renderer>(true).SelectMany(r => r.sharedMaterials).ToArray();
+        private void MaterialChecks(MmdSceneWorkspace ui, MmdSceneService.SceneObject a, MmdSceneService.SceneObject b, MmdSceneService.SceneObject stage, string directory)
+        {
+            var camera = Camera.main; var view = ui.View;
+            var savedView = (view.Pivot, view.Yaw, view.Pitch, view.Distance);
+            var savedGraphics = ui.Graphics.Settings; var savedSelection = ui.SelectedId;
+            var light = ui.Graphics.Settings; light.backgroundColor = new Color(.5f, .55f, .6f); light.lightIntensity = 2; light.lightYaw = -30; light.lightPitch = 35;
+            // SSAO's blue noise moves between renders; measure without screen effects.
+            light.ssaoEnabled = false; light.dofEnabled = false; light.vignetteEnabled = false; light.bloomEnabled = false;
+            ui.ApplyGraphics(light);
+            // The look preset checks left the characters in toon (presets carry a character style).
+            foreach (var item in new[] { a, b }) ui.Scene.SetMaterialStyle(item.Id, new MaterialStyleData());
+            Activate(ui.Root, "object-" + a.Id);
+            var originals = MaterialsOf(a);
+            var dropdown = ui.Root.Q<DropdownField>("MaterialStyle");
+            var characterChoices = !dropdown.choices.Contains("PBR") && dropdown.choices.Contains("툰");
+            dropdown.value = "툰";
+            var toonMaterials = MaterialsOf(a);
+            var toonCount = toonMaterials.Count(m => m.shader.name == "EasyDanceStudio/Toon");
+            var replaced = toonCount > 0 && toonCount == originals.Length - a.Styler.UnsupportedCount && a.MaterialStyle.style == MaterialStyleData.Toon &&
+                ui.Root.Q("ToonControls").style.display.value == DisplayStyle.Flex;
+            dropdown.value = "원본";
+            var restored = MaterialsOf(a).SequenceEqual(originals);
+            var restoreDiff = string.Join(", ", MaterialsOf(a).Zip(originals, (x, y) => x == y ? "" : (x == null ? "null" : x.name + "#" + x.GetInstanceID()) + "!=" + (y == null ? "null" : y.name + "#" + y.GetInstanceID()))
+                .Where(t => t.Length > 0).Take(3)) + " counts " + MaterialsOf(a).Length + "/" + originals.Length;
+            ui.Undo();
+            var undoToon = MaterialsOf(a).SequenceEqual(toonMaterials);
+            ui.Undo();
+            var undoOriginal = MaterialsOf(a).SequenceEqual(originals) && a.MaterialStyle.style == MaterialStyleData.Original;
+            ui.Redo();
+            Check("toon_style_replaces_materials_and_original_restores [toon " + toonCount + "/" + originals.Length + " choices=" + characterChoices + " replaced=" + replaced +
+                " restored=" + restored + " undo=" + undoToon + "/" + undoOriginal + " diff: " + restoreDiff + "]", characterChoices && replaced && restored && undoToon && undoOriginal &&
+                a.MaterialStyle.style == MaterialStyleData.Toon);
+
+            // The toon shader is in the Player and takes the light: dimming or turning the light
+            // changes the character (the unlit original does not).
+            ui.FrameIds(a.Id);
+            Activate(ui.Root, "explorer-light"); // no selection highlight in the measured frames
+            float Changed(Color32[] x, Color32[] y) =>
+                x.Zip(y, (p, q) => Math.Abs((p.r + p.g + p.b) - (q.r + q.g + q.b)) >= 9 ? 1 : 0).Sum() / (float)x.Length;
+            var toonBright = RenderedPixels(camera);
+            SaveRendered(camera, Path.Combine(directory, "material-light-bright.png"));
+            ui.Root.Q<Slider>("LightYaw").value = 150;
+            var toonTurned = RenderedPixels(camera);
+            ui.Root.Q<Slider>("LightYaw").value = -30;
+            ui.Root.Q<Slider>("LightIntensity").value = .6f;
+            var toonDim = RenderedPixels(camera);
+            SaveRendered(camera, Path.Combine(directory, "material-light-dim.png"));
+            var keepToon = a.MaterialStyle.Clone();
+            ui.Scene.SetMaterialStyle(a.Id, new MaterialStyleData());
+            var plainDim = RenderedPixels(camera);
+            SaveRendered(camera, Path.Combine(directory, "material-plain-dim.png"));
+            ui.Root.Q<Slider>("LightIntensity").value = 2;
+            var plainBright = RenderedPixels(camera);
+            SaveRendered(camera, Path.Combine(directory, "material-plain-bright.png"));
+            ui.Scene.SetMaterialStyle(a.Id, keepToon);
+            Activate(ui.Root, "object-" + a.Id);
+            var dimmed = Changed(toonBright, toonDim); var turned = Changed(toonBright, toonTurned); var plain = Changed(plainBright, plainDim);
+            Check("toon_shader_in_player_responds_to_light [pixels changed: toon dim " + (dimmed * 100).ToString("0.0") + "%, turned " + (turned * 100).ToString("0.0") +
+                "%, original " + (plain * 100).ToString("0.00") + "%]", dimmed > .01f && turned > .005f && plain < .001f);
+
+            // Controls drive the material values; the outline pass switches off.
+            ui.Root.Q<Slider>("ToonShadowStrength").value = .3f;
+            ui.Root.Q<Slider>("ToonOutlineWidth").value = 2;
+            ui.Root.Q<Toggle>("ToonRim").value = false;
+            var toon = MaterialsOf(a).Where(m => m.shader.name == "EasyDanceStudio/Toon").ToArray();
+            var pmx = a.Model.model.materials;
+            var edgeMaterials = toon.Count(m => m.GetFloat("_OutlineWidth") > 0);
+            var values = toon.All(m => Math.Abs(m.GetFloat("_ShadowStrength") - .3f) < 1e-5f && m.GetFloat("_RimStrength") == 0) && edgeMaterials > 0 &&
+                true;
+            var outlined = RenderedSharpness(camera);
+            ui.Root.Q<Toggle>("ToonOutline").value = false;
+            var noOutline = RenderedSharpness(camera);
+            var passOff = MaterialsOf(a).Where(m => m.shader.name == "EasyDanceStudio/Toon").All(m => m.GetFloat("_OutlineWidth") == 0);
+            ui.Root.Q<Toggle>("ToonOutline").value = true; ui.Root.Q<Toggle>("ToonRim").value = true;
+            ui.Root.Q<Slider>("ToonShadowStrength").value = 1; ui.Root.Q<Slider>("ToonOutlineWidth").value = 1;
+            Check("toon_controls_drive_material_values_and_outline_pass [edge materials " + edgeMaterials + "/" + toon.Length + ", sharpness outline " + outlined.ToString("0.00") +
+                " none " + noOutline.ToString("0.00") + "]", values && passOff && Math.Abs(outlined - noOutline) > .01f);
+
+            // PBR is offered for backgrounds only.
+            Activate(ui.Root, "object-" + stage.Id);
+            var stageChoices = ui.Root.Q<DropdownField>("MaterialStyle").choices.Contains("PBR");
+            ui.Root.Q<DropdownField>("MaterialStyle").value = "PBR";
+            ui.Root.Q<Slider>("PbrSmoothness").value = .8f;
+            var stageMaterials = MaterialsOf(stage).Where(m => m.shader.name == "EasyDanceStudio/StageLit").ToArray();
+            ui.FrameIds(stage.Id);
+            Activate(ui.Root, "explorer-light");
+            var pbr = RenderedPixels(camera);
+            SaveRendered(camera, Path.Combine(directory, "material-pbr-bright.png"));
+            ui.Root.Q<Slider>("LightIntensity").value = .5f;
+            var pbrDim = RenderedPixels(camera);
+            SaveRendered(camera, Path.Combine(directory, "material-pbr-dim.png"));
+            ui.Root.Q<Slider>("LightIntensity").value = 2;
+            Activate(ui.Root, "object-" + stage.Id);
+            var pbrChanged = Changed(pbr, pbrDim);
+            var rejected = false;
+            try { ui.Scene.SetMaterialStyle(a.Id, new MaterialStyleData { style = MaterialStyleData.Pbr }); } catch (InvalidOperationException) { rejected = true; }
+            Check("pbr_style_for_backgrounds_only_and_lit [" + stageMaterials.Length + " materials, pixels changed by the light " + (pbrChanged * 100).ToString("0.0") + "%]", stageChoices &&
+                stageMaterials.Length > 0 && stageMaterials.All(m => Math.Abs(m.GetFloat("_Smoothness") - .8f) < 1e-5f) && pbrChanged > .01f && rejected && a.MaterialStyle.style == MaterialStyleData.Toon);
+
+            // Before/after on two different models (skin, hair, transparent parts), saved for review.
+            var details = new List<string>();
+            var differ = true;
+            foreach (var item in new[] { a, b })
+            {
+                var name = Path.GetFileNameWithoutExtension(item.ModelSource);
+                ui.FrameIds(item.Id);
+                var keep = item.MaterialStyle.Clone();
+                ui.Scene.SetMaterialStyle(item.Id, new MaterialStyleData());
+                var before = RenderedLuminance(camera);
+                SaveRendered(camera, Path.Combine(directory, "material-" + (item == a ? "a" : "b") + "-original.png"));
+                ui.Scene.SetMaterialStyle(item.Id, new MaterialStyleData { style = MaterialStyleData.Toon });
+                var after = RenderedLuminance(camera);
+                SaveRendered(camera, Path.Combine(directory, "material-" + (item == a ? "a" : "b") + "-toon.png"));
+                ui.Scene.SetMaterialStyle(item.Id, keep);
+                var styler = item.Styler;
+                differ &= Math.Abs(after - before) > .5f;
+                details.Add(name + ": 재질 " + styler.MaterialCount + " · 반투명 " + styler.TransparentCount + " · 윤곽선 " + styler.EdgeCount + " · 툰 텍스처 " +
+                    styler.ToonMapCount + " · 스피어 " + styler.SphereCount + " · 미지원 " + styler.UnsupportedCount + " · 휘도 " + before.ToString("0.0") + "→" + after.ToString("0.0"));
+            }
+            Debug.Log("[material-probe] " + string.Join(" | ", details));
+            Check("two_models_before_after_images [" + string.Join(" | ", details) + "]", differ &&
+                new[] { "a-original", "a-toon", "b-original", "b-toon" }.All(n => File.Exists(Path.Combine(directory, "material-" + n + ".png"))) &&
+                ui.Root.Q<Label>("MaterialWarnings") != null);
+
+            // Leave Gene in toon and the stage in PBR: saved with the scene, checked on relaunch.
+            view.Set(savedView.Pivot, savedView.Yaw, savedView.Pitch, savedView.Distance); view.Apply(camera);
+            ui.ApplyGraphics(savedGraphics);
+            if (savedSelection != null) ui.Select(savedSelection);
+        }
         // ----- H2a-05 look presets -----
         private static void SaveRendered(Camera camera, string file)
         {
@@ -1464,14 +1602,17 @@ namespace MmdStudio.Poc
             var state = ui.Root.Q<Label>("LookState");
             var bright = MmdLookPresets.BuiltIn[0];
             var before = JsonUtility.ToJson(graphics.Settings);
+            var characters = ui.Scene.Objects.Where(o => o.Kind == MmdSceneService.ObjectKind.Character).ToArray();
+            var stylesBefore = characters.Select(o => o.MaterialStyle.style).ToArray();
             var fov = camera.fieldOfView; var quality = graphics.Settings.effectQuality;
             var listed = MmdLookPresets.BuiltIn.Length >= 3 && MmdLookPresets.BuiltIn.All(p => dropdown.choices.Contains(p.name));
             dropdown.value = bright.name;
             var applied = MmdLookPresets.SameLook(bright.values, graphics.Settings) && graphics.Settings.lookPreset == bright.name &&
                 state.text.Contains("적용됨") && Math.Abs(camera.fieldOfView - fov) < 1e-4f && graphics.Settings.effectQuality == quality &&
-                Math.Abs(graphics.Sun.intensity - bright.values.lightIntensity) < 1e-4f && graphics.Ssao.isActive == bright.values.ssaoEnabled;
+                Math.Abs(graphics.Sun.intensity - bright.values.lightIntensity) < 1e-4f && graphics.Ssao.isActive == bright.values.ssaoEnabled &&
+                characters.All(o => o.MaterialStyle.style == MaterialStyleData.Toon); // H2b-01: presets give characters the toon style
             ui.Undo();
-            var undone = JsonUtility.ToJson(graphics.Settings) == before;
+            var undone = JsonUtility.ToJson(graphics.Settings) == before && characters.Select(o => o.MaterialStyle.style).SequenceEqual(stylesBefore);
             ui.Redo();
             Check("look_presets_listed_and_applied_in_one_undo_step [listed=" + listed + " applied=" + applied + " undone=" + undone + "]",
                 listed && applied && undone && graphics.Settings.lookPreset == bright.name && ui.UndoLabel == "룩 프리셋");

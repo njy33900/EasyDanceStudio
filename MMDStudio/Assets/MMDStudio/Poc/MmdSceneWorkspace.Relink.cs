@@ -78,6 +78,7 @@ namespace MmdStudio.Poc
                 foreach (var entry in physics.strength ?? new List<PartStrength>()) Scene.SetPhysicsStrength(id, entry.part, Mathf.Clamp01(entry.value));
                 if (physics.enabled && item.Motion != null) Scene.SetPhysics(id, true);
                 if (!string.IsNullOrEmpty(physics.spring) && item.Motion != null && item.SpringAvailable) Scene.SetSpring(id, physics.spring);
+                if (data.material != null && data.material.style != MaterialStyleData.Original) ApplyStoredMaterial(id, data.material, null);
                 Push(new RelinkCommand { Label = "파일 다시 연결", ObjectId = id, Item = item, Index = index, Missing = missing, MotionMissing = motionMissing });
                 SelectedId = id; Target = InspectorTarget.Object;
                 message = "다시 연결했습니다: " + Path.GetFileName(pmx) + (motionMissing != null ? " · VMD는 아직 누락입니다." : "");

@@ -99,7 +99,18 @@ namespace MmdStudio.Poc
             // Depth of field without a focus target: keep the first character in focus.
             if (next.dofEnabled && next.dofTarget.Length == 0)
                 next.dofTarget = Scene.Objects.FirstOrDefault(o => o.Kind == MmdSceneService.ObjectKind.Character)?.Id ?? "";
-            Record("룩 프리셋", null, () => Graphics.Apply(next));
+            Record("룩 프리셋", null, () =>
+            {
+                Graphics.Apply(next);
+                // H2b-01: the preset's character style (toon keeps each character's own toon values).
+                if (preset.characterStyle == MaterialStyleData.Toon)
+                    foreach (var item in Scene.Objects.Where(o => o.Kind == MmdSceneService.ObjectKind.Character).ToArray())
+                        if (item.MaterialStyle.style != MaterialStyleData.Toon)
+                        {
+                            var style = item.MaterialStyle.Clone(); style.style = MaterialStyleData.Toon;
+                            Scene.SetMaterialStyle(item.Id, style);
+                        }
+            });
             message = "룩 프리셋 적용: " + preset.name;
         }
 

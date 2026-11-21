@@ -1,6 +1,6 @@
 #!/bin/bash
 # H1-04: one command for the scene regression suite. Builds the V0 Player once, then runs
-#   UI (171+ checks) + relaunched restore (11), scene file format (H1-05), repeated open
+#   UI (177+ checks) + relaunched restore (12), scene file format (H1-05), repeated open
 #   cancel/retry (H1-01) and crash recovery (H1-06), then prints one summary with the result
 #   locations and checks that the build left no tracked files modified.
 # Opens Player windows for several minutes (do not run while the user is gaming).
@@ -34,9 +34,9 @@ step cycle bash scripts/bash/run-scene-cycle.sh "$CFG" "$BK" "$CYCLES"
 step recovery bash scripts/bash/run-recovery.sh "$CFG" "$BK"
 AFTER=$(tracked_state)
 
-PYTHONIOENCODING=utf-8 python - "$UI" "$BK" "$CFG" "$START" "$BEFORE" "$AFTER" <<'PY'
-import json, os, sys
-ui, bk, cfg, start, before, after = sys.argv[1:7]
+PYTHONIOENCODING=utf-8 python - "$UI" "$BK" "$CFG" "$START" "$BEFORE" "$AFTER" "$LOGS" <<'PY'
+import json, os, re, sys
+ui, bk, cfg, start, before, after, logs = sys.argv[1:8]
 start = int(start)
 rows, failed = [], False
 def load(path):
@@ -57,8 +57,8 @@ def checked(name, path, minimum=None, extra=None):
     if extra: e_ok, e_detail = extra(r); ok = ok and e_ok; detail += ', ' + e_detail
     if not r.get('success'): detail += ' | ' + (r.get('error') or '')[:300].replace('\n', ' ')
     add(name, path, ok, detail)
-checked('UI', os.path.join(ui, 'scene-ui.json'), 171)
-checked('restore', os.path.join(ui, 'scene-restore.json'), 11)
+checked('UI', os.path.join(ui, 'scene-ui.json'), 177)
+checked('restore', os.path.join(ui, 'scene-restore.json'), 12)
 checked('format', 'artifacts/scene-format/%s-%s/scene-format.json' % (bk, cfg), 7)
 r, problem = load('artifacts/scene-cycle/%s-%s/scene-cycle.json' % (bk, cfg))
 path = 'artifacts/scene-cycle/%s-%s/scene-cycle.json' % (bk, cfg)
@@ -68,6 +68,14 @@ else: add('cycle', path, bool(r['success']) and bool(r['objectCountsStable']),
           ('' if r['success'] else ' | ' + r['error'][:300]))
 for name in ('write1', 'restore', 'write2', 'discard'):
     checked('recovery ' + name, 'artifacts/recovery/%s-%s/%s.json' % (bk, cfg, name))
+# A Player that wrote a passing report can still crash while quitting (H2b-01 found one in
+# D3D12): every Player exit code the runners print must be clean.
+crashes = []
+for name in sorted(os.listdir(logs)):
+    for line in open(os.path.join(logs, name), encoding='utf-8', errors='replace'):
+        if 'Segmentation fault' in line or re.search(r'(EXIT=|exit )(139|-1073741819|3221225477)', line):
+            crashes.append(name[:-4] + ': ' + line.strip()[:120])
+add('player exits', logs, not crashes, 'clean' if not crashes else '; '.join(crashes[:4]))
 changed = sorted(set(after.splitlines()) - set(before.splitlines()))
 add('tracked files', 'git status', not changed, 'unchanged' if not changed else 'modified by the run: ' + ', '.join(changed))
 print()

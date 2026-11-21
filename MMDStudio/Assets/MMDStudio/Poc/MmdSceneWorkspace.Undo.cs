@@ -21,6 +21,7 @@ namespace MmdStudio.Poc
             public bool visible, physics;
             public string spring;
             public float[] strength; // per MmdPhysicsParts.Order
+            public string material;   // MaterialStyleData JSON (H2b-01)
         }
         private sealed class LightState
         {
@@ -116,13 +117,14 @@ namespace MmdStudio.Poc
                     position = item.Placement.localPosition, rotation = item.Placement.localEulerAngles, scale = item.Placement.localScale,
                     visible = item.Visible, physics = item.PhysicsEnabled, spring = item.SpringPreset,
                     strength = MmdPhysicsParts.Order.Select(item.StrengthOf).ToArray(),
+                    material = JsonUtility.ToJson(item.MaterialStyle),
                 };
             return state;
         }
 
         private static bool Same(ObjectState a, ObjectState b) =>
             a.position == b.position && a.rotation == b.rotation && a.scale == b.scale && a.visible == b.visible &&
-            a.physics == b.physics && a.spring == b.spring && a.strength.SequenceEqual(b.strength);
+            a.physics == b.physics && a.spring == b.spring && a.strength.SequenceEqual(b.strength) && a.material == b.material;
 
         private static bool Same(LightState a, LightState b) =>
             a.graphics == b.graphics && a.loop == b.loop && a.speed == b.speed && a.audioVolume == b.audioVolume && a.audioMuted == b.audioMuted && a.objects.Count == b.objects.Count &&
@@ -148,6 +150,7 @@ namespace MmdStudio.Poc
                     if (now.strength[i] != want.strength[i]) Scene.SetPhysicsStrength(entry.Key, MmdPhysicsParts.Order[i], want.strength[i]);
                 if (now.physics != want.physics) Scene.SetPhysics(entry.Key, want.physics);
                 if (now.spring != want.spring) Scene.SetSpring(entry.Key, want.spring);
+                if (now.material != want.material) Scene.SetMaterialStyle(entry.Key, JsonUtility.FromJson<MaterialStyleData>(want.material));
             }
         }
 
