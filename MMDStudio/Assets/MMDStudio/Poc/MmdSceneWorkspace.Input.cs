@@ -8,9 +8,9 @@ using UnityEngine.UIElements;
 
 namespace MmdStudio.Poc
 {
-    // H1-04: viewport input routing — device polling, the per-frame input router and mesh picking
-    // (split from MmdSceneWorkspace.cs).
-    public sealed partial class MmdSceneWorkspace
+    // H1-04: the studio side of viewport input (ViewportInputRouter holds the rules) and mesh
+    // picking (split from MmdSceneWorkspace.cs).
+    public sealed partial class MmdSceneWorkspace : IViewportInputTarget
     {
         // Pointer is over an opaque UI panel (the viewport and its hint ignore picking).
         // screen uses Input System coordinates: origin bottom-left.
@@ -29,81 +29,50 @@ namespace MmdStudio.Poc
                 if (element.ClassListContains("unity-base-text-field") || element.ClassListContains("unity-composite-field")) return true;
             return false;
         }
-        public const float ClickSlopPixels = 5;
-        // One frame of viewport input. Right drag orbits, middle or Shift+right drag pans,
-        // wheel zooms, left click (press+release within ClickSlopPixels) picks. Keys:
-        // F frames the selection, Space plays/pauses, Delete asks to delete the selection,
-        // Esc cancels the delete dialog, W/E/R switch the gizmo (gizmoKey 1/2/3); a left press on a
-        // gizmo handle drags it instead of picking. A press must start inside the viewport; a started
-        // drag continues across panels. While a text field has focus, wheel and keys are
-        // ignored and a viewport press only commits the field. While the delete dialog is
-        // open only Esc is handled (its full-screen overlay also blocks pointer input).
+        public const float ClickSlopPixels = ViewportInputRouter.ClickSlopPixels;
+        private readonly ViewportInputRouter inputRouter = new ViewportInputRouter();
+        // One frame of viewport input (see ViewportInputRouter for the rules). Probes call this
+        // directly; the Player feeds it from ReadDevices.
         internal void ProcessViewportInput(Vector2 screen, Vector2 delta, float scrollNotches, bool orbitHeld, bool panHeld, bool frameKey,
             bool leftHeld = false, bool playKey = false, bool deleteKey = false, bool cancelKey = false, bool saveKey = false, int gizmoKey = 0, bool focusKey = false,
-            bool undoKey = false, bool redoKey = false)
-        {
-            var pressed = (orbitHeld && !orbitWasHeld) || (panHeld && !panWasHeld);
-            var leftPressed = leftHeld && !leftWasHeld; var leftReleased = !leftHeld && leftWasHeld;
-            orbitWasHeld = orbitHeld; panWasHeld = panHeld; leftWasHeld = leftHeld;
-            if (!orbitHeld && !panHeld && drag != Drag.Gizmo) drag = Drag.None;
-            if (drag == Drag.Gizmo && !leftHeld) { drag = Drag.None; EndGizmoDrag(); }
-            if (Camera.main == null) { CancelPointerDrag(); return; }
-            if (DialogVisible)
+            bool undoKey = false, bool redoKey = false) =>
+            inputRouter.Route(new ViewportInputFrame
             {
-                CancelPointerDrag();
-                if (cancelKey) CancelDialog();
-                return;
-            }
-            if (ConfirmVisible)
-            {
-                CancelPointerDrag();
-                if (cancelKey) CancelRemove();
-                return;
-            }
-            var textFocused = TextInputFocused();
-            if (!textFocused && focusKey) { SetFocusView(!FocusView); return; }
-            if (FocusView && cancelKey) { SetFocusView(false); return; }
-            if (Busy) { CancelPointerDrag(); return; }
-            var camera = Camera.main;
-            if ((pressed || leftPressed) && drag == Drag.None && PointerInViewport(screen))
-            {
-                var focused = Root.panel.focusController.focusedElement as VisualElement;
-                // Release focus so keys typed afterwards are not routed to a panel control.
-                focused?.Blur();
-                if (textFocused) return; // This press only commits the field.
-                if (leftPressed && BeginGizmoDrag(screen)) { drag = Drag.Gizmo; return; }
-                if (leftPressed) { clickCandidate = true; clickStart = screen; }
-                else { drag = panHeld ? Drag.Pan : Drag.Orbit; return; } // The press frame's delta precedes the drag.
-            }
-            if (clickCandidate && (screen - clickStart).sqrMagnitude > ClickSlopPixels * ClickSlopPixels) clickCandidate = false;
-            if (leftReleased && clickCandidate)
-            {
-                clickCandidate = false;
-                SelectFromViewport(PickAt(screen));
-            }
-            if (!leftHeld) clickCandidate = false;
-            if (drag == Drag.Gizmo) { UpdateGizmoDrag(screen); return; }
-            UpdateGizmoHover(screen, PointerInViewport(screen));
-            if (drag == Drag.Orbit) View.Orbit(delta);
-            else if (drag == Drag.Pan) View.Pan(delta, camera.pixelHeight, camera.fieldOfView);
-            else if (!textFocused)
-            {
-                if (scrollNotches != 0 && PointerInViewport(screen)) View.Zoom(scrollNotches);
-                if (frameKey) FrameSelected();
-                if (playKey && Scene.Duration > 0) Guard(() => Scene.Playing = !Scene.Playing);
-                if (deleteKey && (Selected != null || SelectedUnresolved != null)) RequestRemove();
-                if (saveKey) Guard(() => Save());
-                if (undoKey) Guard(Undo);
-                if (redoKey) Guard(Redo);
-                if (gizmoKey >= 1 && gizmoKey <= 3) SetGizmoMode((GizmoMode)(gizmoKey - 1));
-            }
-            View.Apply(camera);
-        }
-        private void CancelPointerDrag()
-        {
-            if (drag == Drag.Gizmo) EndGizmoDrag();
-            drag = Drag.None; clickCandidate = false;
-        }
+                Screen = screen, Delta = delta, ScrollNotches = scrollNotches, OrbitHeld = orbitHeld, PanHeld = panHeld, LeftHeld = leftHeld,
+                FrameKey = frameKey, PlayKey = playKey, DeleteKey = deleteKey, CancelKey = cancelKey, SaveKey = saveKey, GizmoKey = gizmoKey,
+                FocusKey = focusKey, UndoKey = undoKey, RedoKey = redoKey,
+            }, this);
+        private void ReadDevices() { if (ViewportInputFrame.ReadDevices(out var frame)) inputRouter.Route(frame, this); }
+        private void CancelPointerDrag() => inputRouter.Cancel(this);
+
+        // ----- IViewportInputTarget: what the router may ask of the studio -----
+        bool IViewportInputTarget.CameraReady => Camera.main != null;
+        bool IViewportInputTarget.DialogOpen => DialogVisible;
+        void IViewportInputTarget.CancelDialog() => CancelDialog();
+        bool IViewportInputTarget.ConfirmOpen => ConfirmVisible;
+        void IViewportInputTarget.CancelConfirm() => CancelRemove();
+        bool IViewportInputTarget.TextFocused => TextInputFocused();
+        bool IViewportInputTarget.FocusView => FocusView;
+        void IViewportInputTarget.SetFocusView(bool focused) => SetFocusView(focused);
+        bool IViewportInputTarget.Busy => Busy;
+        bool IViewportInputTarget.PointerInViewport(Vector2 screen) => PointerInViewport(screen);
+        void IViewportInputTarget.ReleaseFocus() => (Root.panel?.focusController?.focusedElement as VisualElement)?.Blur();
+        bool IViewportInputTarget.BeginGizmoDrag(Vector2 screen) => BeginGizmoDrag(screen);
+        void IViewportInputTarget.UpdateGizmoDrag(Vector2 screen) => UpdateGizmoDrag(screen);
+        void IViewportInputTarget.EndGizmoDrag() => EndGizmoDrag();
+        void IViewportInputTarget.UpdateGizmoHover(Vector2 screen, bool overViewport) => UpdateGizmoHover(screen, overViewport);
+        void IViewportInputTarget.ClickAt(Vector2 screen) => SelectFromViewport(PickAt(screen));
+        void IViewportInputTarget.Orbit(Vector2 delta) => View.Orbit(delta);
+        void IViewportInputTarget.Pan(Vector2 delta) => View.Pan(delta, Camera.main.pixelHeight, Camera.main.fieldOfView);
+        void IViewportInputTarget.Zoom(float notches) => View.Zoom(notches);
+        void IViewportInputTarget.ApplyView() => View.Apply(Camera.main);
+        void IViewportInputTarget.FrameSelection() => FrameSelected();
+        void IViewportInputTarget.TogglePlay() { if (Scene.Duration > 0) Guard(() => Scene.Playing = !Scene.Playing); }
+        void IViewportInputTarget.RequestDelete() { if (Selected != null || SelectedUnresolved != null) RequestRemove(); }
+        void IViewportInputTarget.Save() => Guard(() => Save());
+        void IViewportInputTarget.Undo() => Guard(Undo);
+        void IViewportInputTarget.Redo() => Guard(Redo);
+        void IViewportInputTarget.SetGizmo(int key) => SetGizmoMode((GizmoMode)(key - 1));
 
         // Nearest visible object whose skinned mesh triangles the screen ray hits.
         // Each renderer's world bounds is tested first; candidate meshes are baked at
@@ -159,27 +128,6 @@ namespace MmdStudio.Poc
             var q = Vector3.Cross(s, e1); var v = Vector3.Dot(direction, q) * inv;
             if (v < 0 || u + v > 1) return -1;
             return Vector3.Dot(e2, q) * inv;
-        }
-
-        private void ReadDevices()
-        {
-            var mouse = UnityEngine.InputSystem.Mouse.current;
-            if (mouse == null) return;
-            var keyboard = UnityEngine.InputSystem.Keyboard.current;
-            var shift = keyboard != null && keyboard.shiftKey.isPressed;
-            var right = mouse.rightButton.isPressed;
-            var scroll = mouse.scroll.ReadValue().y;
-            // Windows reports 120 per wheel notch unless the Input System normalizes it.
-            var notches = Mathf.Abs(scroll) >= 10 ? scroll / 120 : scroll;
-            bool Pressed(UnityEngine.InputSystem.Controls.KeyControl key) => keyboard != null && key.wasPressedThisFrame;
-            ProcessViewportInput(mouse.position.ReadValue(), mouse.delta.ReadValue(), notches,
-                right && !shift, mouse.middleButton.isPressed || (right && shift), Pressed(keyboard?.fKey),
-                mouse.leftButton.isPressed, Pressed(keyboard?.spaceKey), Pressed(keyboard?.deleteKey), Pressed(keyboard?.escapeKey),
-                keyboard != null && keyboard.ctrlKey.isPressed && keyboard.sKey.wasPressedThisFrame,
-                keyboard == null || keyboard.ctrlKey.isPressed ? 0 : keyboard.wKey.wasPressedThisFrame ? 1 : keyboard.eKey.wasPressedThisFrame ? 2 : keyboard.rKey.wasPressedThisFrame ? 3 : 0,
-                keyboard != null && !keyboard.ctrlKey.isPressed && keyboard.hKey.wasPressedThisFrame,
-                keyboard != null && keyboard.ctrlKey.isPressed && !keyboard.shiftKey.isPressed && keyboard.zKey.wasPressedThisFrame,
-                keyboard != null && keyboard.ctrlKey.isPressed && (keyboard.yKey.wasPressedThisFrame || (keyboard.shiftKey.isPressed && keyboard.zKey.wasPressedThisFrame)));
         }
     }
 }

@@ -42,22 +42,15 @@ namespace MmdStudio.Poc
         private VisualElement viewport;
         private VisualElement viewportHint;
         private string hoverHint;
-        private enum Drag { None, Orbit, Pan, Gizmo }
-        private Drag drag;
-        private bool orbitWasHeld, panWasHeld, leftWasHeld, clickCandidate;
-        private Vector2 clickStart;
         private Mesh pickMesh;
         private readonly System.Collections.Generic.List<Vector3> pickVertices = new System.Collections.Generic.List<Vector3>();
         private readonly System.Collections.Generic.List<int> pickTriangles = new System.Collections.Generic.List<int>();
         private VisualElement confirm;
         private Label confirmText;
         private string confirmId;
-        private GameObject highlight;
-        private LineRenderer highlightBox, highlightRing;
-        private Material highlightMaterial;
         public MmdViewportCamera View { get; } = new MmdViewportCamera();
-        internal bool HighlightVisible => highlight != null && highlight.activeSelf;
-        internal Bounds HighlightBounds { get; private set; }
+        internal bool HighlightVisible => highlight != null && highlight.Visible;
+        internal Bounds HighlightBounds => highlight != null ? highlight.Bounds : default;
         private string message = "캐릭터나 배경을 추가하고 캐릭터에 VMD를 연결하세요.";
         private MmdSceneService.SceneObject Selected => Scene.Objects.FirstOrDefault(item => item.Id == SelectedId);
         private static readonly Color IconColour = new Color(.25f, .25f, .28f);
@@ -449,7 +442,7 @@ namespace MmdStudio.Poc
         {
             loadCancellation?.Cancel();
             if (settings != null) Destroy(settings); if (font != null) Destroy(font); if (input != null) Destroy(input);
-            if (highlightMaterial != null) Destroy(highlightMaterial);
+            highlight?.Dispose();
             if (pickMesh != null) Destroy(pickMesh);
             Application.wantsToQuit -= OnWantsToQuit;
         }

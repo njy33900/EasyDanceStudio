@@ -56,45 +56,14 @@ namespace MmdStudio.Poc
             else Select(item.Id);
         }
 
-        private void CreateHighlight()
-        {
-            highlight = new GameObject("Selection Highlight");
-            highlight.transform.SetParent(transform, false);
-            var shader = Shader.Find("Sprites/Default") ?? Shader.Find("Universal Render Pipeline/Unlit");
-            highlightMaterial = new Material(shader) { color = new Color(.15f, .39f, .92f, .95f) };
-            highlightBox = Line("Bounds", 16, false);
-            highlightRing = Line("Ground", 48, true);
-            highlight.SetActive(false);
-        }
-        private LineRenderer Line(string name, int count, bool loop)
-        {
-            var line = new GameObject(name).AddComponent<LineRenderer>();
-            line.transform.SetParent(highlight.transform, false);
-            line.sharedMaterial = highlightMaterial; line.positionCount = count; line.loop = loop; line.useWorldSpace = true;
-            line.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; line.receiveShadows = false;
-            line.startColor = line.endColor = Color.white; line.numCapVertices = 2;
-            return line;
-        }
+        private SelectionHighlight highlight;
+        private void CreateHighlight() => highlight = new SelectionHighlight(transform);
         internal void UpdateHighlight()
         {
             if (highlight == null) return;
             var selected = Selected;
-            if (FocusView || selected == null || !selected.Visible || !TryBounds(new[] { selected }, out var bounds)) { highlight.SetActive(false); return; }
-            HighlightBounds = bounds; highlight.SetActive(true);
-            var min = bounds.min; var max = bounds.max;
-            Vector3 P(float x, float y, float z) => new Vector3(x, y, z);
-            var b0 = P(min.x, min.y, min.z); var b1 = P(max.x, min.y, min.z); var b2 = P(max.x, min.y, max.z); var b3 = P(min.x, min.y, max.z);
-            var t0 = P(min.x, max.y, min.z); var t1 = P(max.x, max.y, min.z); var t2 = P(max.x, max.y, max.z); var t3 = P(min.x, max.y, max.z);
-            highlightBox.SetPositions(new[] { b0, b1, b2, b3, b0, t0, t1, b1, t1, t2, b2, t2, t3, b3, t3, t0 });
-            var width = Mathf.Clamp(View.Distance * .0025f, .002f, .5f);
-            highlightBox.widthMultiplier = width; highlightRing.widthMultiplier = width * 1.5f;
-            var centre = selected.Placement.position; centre.y = min.y;
-            var radius = Mathf.Max(.1f, Mathf.Max(bounds.extents.x, bounds.extents.z) * 1.1f);
-            for (var i = 0; i < highlightRing.positionCount; i++)
-            {
-                var angle = i * Mathf.PI * 2 / highlightRing.positionCount;
-                highlightRing.SetPosition(i, centre + new Vector3(Mathf.Cos(angle) * radius, .002f, Mathf.Sin(angle) * radius));
-            }
+            if (FocusView || selected == null || !selected.Visible || !TryBounds(new[] { selected }, out var bounds)) { highlight.Hide(); return; }
+            highlight.Show(bounds, selected.Placement.position, View.Distance);
         }
     }
 }

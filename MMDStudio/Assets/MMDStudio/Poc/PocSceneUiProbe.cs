@@ -39,6 +39,39 @@ namespace MmdStudio.Poc
             public string SaveScene(string suggestedName) => Answer("SaveScene:" + suggestedName);
             public string SaveText(string suggestedName) => Answer("SaveText");
         }
+        // Records what the input router asks for; the viewport covers everything unless told otherwise.
+        private sealed class FakeViewportTarget : IViewportInputTarget
+        {
+            public readonly List<string> Log = new List<string>();
+            public bool InViewport = true;
+            public bool CameraReady => true;
+            public bool DialogOpen { get; set; }
+            public void CancelDialog() => Log.Add("cancelDialog");
+            public bool ConfirmOpen => false;
+            public void CancelConfirm() => Log.Add("cancelConfirm");
+            public bool TextFocused => false;
+            public bool FocusView => false;
+            public void SetFocusView(bool focused) => Log.Add("focus " + focused);
+            public bool Busy => false;
+            public bool PointerInViewport(Vector2 screen) => InViewport;
+            public void ReleaseFocus() { }
+            public bool BeginGizmoDrag(Vector2 screen) => false;
+            public void UpdateGizmoDrag(Vector2 screen) => Log.Add("gizmoDrag");
+            public void EndGizmoDrag() => Log.Add("gizmoEnd");
+            public void UpdateGizmoHover(Vector2 screen, bool overViewport) { }
+            public void ClickAt(Vector2 screen) => Log.Add("click " + screen);
+            public void Orbit(Vector2 delta) => Log.Add("orbit");
+            public void Pan(Vector2 delta) => Log.Add("pan");
+            public void Zoom(float notches) => Log.Add("zoom");
+            public void ApplyView() { }
+            public void FrameSelection() => Log.Add("frame");
+            public void TogglePlay() => Log.Add("play");
+            public void RequestDelete() => Log.Add("delete");
+            public void Save() => Log.Add("save");
+            public void Undo() => Log.Add("undo");
+            public void Redo() => Log.Add("redo");
+            public void SetGizmo(int key) => Log.Add("gizmo " + key);
+        }
         private readonly List<string> checks = new List<string>();
         private void Check(string name, bool passed)
         { if (!passed) throw new InvalidOperationException(name); checks.Add(name); }
@@ -581,6 +614,37 @@ namespace MmdStudio.Poc
             }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
             yield return new WaitForSecondsRealtime(.2f);
+
+            // H1-04: the input router on its own, against a recording fake (no UI, scene or camera).
+            try
+            {
+                var fake = new FakeViewportTarget(); var router = new ViewportInputRouter();
+                ViewportInputFrame F(Vector2 at, bool left = false, bool orbit = false, bool cancel = false, bool undo = false) =>
+                    new ViewportInputFrame { Screen = at, Delta = new Vector2(3, 0), LeftHeld = left, OrbitHeld = orbit, CancelKey = cancel, UndoKey = undo };
+                // A click within the slop picks once.
+                router.Route(F(new Vector2(100, 100), left: true), fake); router.Route(F(new Vector2(103, 102)), fake);
+                var clicked = fake.Log.Count(entry => entry.StartsWith("click")) == 1;
+                // A left drag beyond the slop does not pick.
+                fake.Log.Clear();
+                router.Route(F(new Vector2(100, 100), left: true), fake); router.Route(F(new Vector2(120, 100), left: true), fake); router.Route(F(new Vector2(120, 100)), fake);
+                var dragNoPick = !fake.Log.Any(entry => entry.StartsWith("click"));
+                // Right drag orbits after the press frame; a dialog blocks everything but Esc.
+                fake.Log.Clear();
+                router.Route(F(new Vector2(100, 100), orbit: true), fake); router.Route(F(new Vector2(103, 100), orbit: true), fake);
+                var orbited = fake.Log.Count(entry => entry == "orbit") == 1;
+                router.Route(F(new Vector2(100, 100)), fake);
+                fake.Log.Clear(); fake.DialogOpen = true;
+                router.Route(F(new Vector2(100, 100), undo: true), fake); router.Route(F(new Vector2(100, 100), cancel: true), fake);
+                var dialogBlocks = fake.Log.SequenceEqual(new[] { "cancelDialog" });
+                // Outside the viewport a press starts nothing; keys still work.
+                fake.Log.Clear(); fake.DialogOpen = false; fake.InViewport = false;
+                router.Route(F(new Vector2(5, 5), left: true, undo: true), fake); router.Route(F(new Vector2(5, 5)), fake);
+                var outside = fake.Log.Contains("undo") && !fake.Log.Any(entry => entry.StartsWith("click"));
+                Check("input_router_rules_without_ui" + (clicked && dragNoPick && orbited && dialogBlocks && outside ? "" :
+                    " [click=" + clicked + " drag=" + dragNoPick + " orbit=" + orbited + " dialog=" + dialogBlocks + " outside=" + outside + "]"),
+                    clicked && dragNoPick && orbited && dialogBlocks && outside);
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
 
             // H1-04: the toolbar's file buttons through the dialog seam (scripted answers instead of
             // the native dialog): save as, cancelled open, open.

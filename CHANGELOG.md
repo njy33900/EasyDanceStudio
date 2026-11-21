@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Structure cleanup, second pass (H1-04): viewport input rules live in `ViewportInputRouter` (tested on its own with a fake target) and the selection highlight in `SelectionHighlight`. Debug IL2CPP passes the full regression suite.
 - Structure cleanup, first pass (H1-04): repeated builds no longer rewrite the tracked smoke scene; `scripts/bash/verify-all.sh` runs the whole scene regression suite (UI, restore, format, open cancel/retry, crash recovery) and prints one summary; the scene workspace is split into input, selection, import and remove parts; file dialogs sit behind an interface so tests press the real toolbar buttons. The delete prompt no longer claims undo is unsupported.
 - Diagnostics (H1-08): "진단" in the top bar shows version, build, backend, OS, CPU, GPU, display, a scene summary and recent errors/warnings. The text shown can be exported to a file, and the log folder can be opened. No model contents or machine name; the user profile folder is masked.
 - Recent scenes (H1-07): a "최근 장면" toolbar button lists up to 10 recently opened or saved scenes, newest first. Missing files are marked and can be removed one by one or all at once; the list stores paths only, in the app settings folder.
