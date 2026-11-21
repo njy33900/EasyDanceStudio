@@ -139,7 +139,7 @@ namespace MmdStudio.Poc
                 // (atomic replace) and the scene stays unsaved.
                 throw new InvalidOperationException("저장하지 못했습니다(읽기 전용·권한·디스크 문제일 수 있습니다): " + Path.GetFileName(full) + " · 원래 파일은 그대로입니다. 다른 이름으로 저장해 보세요.", ex);
             }
-            RebaseUnresolved(full); RebaseUnresolvedAudio(full);
+            RebaseUnresolved(full); RebaseUnresolvedAudio(full); RebaseUnresolvedCamera(full);
             ProjectPath = full; MarkSaved(); Error = ""; RememberRecent(full);
             message = "저장했습니다: " + Path.GetFileName(full);
             Refresh();
@@ -156,6 +156,7 @@ namespace MmdStudio.Poc
                 view = new ViewData { pivot = View.Pivot, yaw = View.Yaw, pitch = View.Pitch, distance = View.Distance },
                 timeline = new TimelineData { timeSeconds = Scene.Seconds, loop = Scene.Loop, speed = Scene.Speed },
                 audio = CaptureAudio(sceneFile),
+                cameraMotion = CaptureCameraMotion(sceneFile),
             };
             SceneObjectData Live(MmdSceneService.SceneObject item)
             {
@@ -202,7 +203,7 @@ namespace MmdStudio.Poc
         {
             if (Busy) return;
             Scene.Clear(); Scene.Loop = false; Scene.Speed = 1; ClearDocumentState();
-            ClearHistory(); ResetAudio(null, null, 1, false);
+            ClearHistory(); ResetAudio(null, null, 1, false); ResetCameraMotion(null, null, false);
             Graphics.Apply(new SceneGraphicsSettings());
             View.Reset(); View.Apply(Camera.main);
             ClearHistory();
@@ -298,6 +299,13 @@ namespace MmdStudio.Poc
                 if (token.IsCancellationRequested) cancelled = true;
                 if (audio.Problem != null) problems.Add(audio.Problem);
             }
+            var cameraMotion = new PreparedCamera();
+            if (!cancelled && failure == null)
+            {
+                yield return PrepareCameraMotion(file, path, full, token, cameraMotion);
+                if (token.IsCancellationRequested) cancelled = true;
+                if (cameraMotion.Problem != null) problems.Add(cameraMotion.Problem);
+            }
             SceneOpenSeconds = (float)clock.Elapsed.TotalSeconds;
             try
             {
@@ -336,6 +344,7 @@ namespace MmdStudio.Poc
                     View.Set(file.view.pivot, file.view.yaw, file.view.pitch, file.view.distance); View.Apply(Camera.main);
                     ClearHistory();
                     ResetAudio(audio.Track, audio.Missing, file.audio.volume, file.audio.muted);
+                    ResetCameraMotion(cameraMotion.Motion, cameraMotion.Missing, file.cameraMotion.follow);
                     Scene.Loop = file.timeline.loop; Scene.Speed = file.timeline.speed;
                     Scene.Playing = false; Scene.Seek(Math.Min(file.timeline.timeSeconds, Scene.Duration));
                     SelectedId = file.selectedId != null && (Scene.Objects.Any(item => item.Id == file.selectedId) || unresolved.ContainsKey(file.selectedId))

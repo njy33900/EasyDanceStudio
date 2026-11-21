@@ -90,6 +90,7 @@ namespace MmdStudio.Poc
             get
             {
                 double duration = Audio == null ? 0 : Audio.DurationSeconds;
+                if (CameraMotion != null) duration = Math.Max(duration, CameraMotion.DurationSeconds);
                 foreach (var item in objects) if (item.Motion != null) duration = Math.Max(duration, item.Motion.Summary.durationSeconds);
                 return duration;
             }

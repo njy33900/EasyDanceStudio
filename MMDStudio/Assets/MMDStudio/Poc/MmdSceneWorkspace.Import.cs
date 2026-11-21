@@ -18,7 +18,7 @@ namespace MmdStudio.Poc
             if (Busy) return;
             var playing = Scene.Playing; Scene.Playing = false;
             string path;
-            try { path = kind == PickKind.Audio ? FileDialogs.OpenAudio() : kind != PickKind.Motion ? FileDialogs.OpenModel() : FileDialogs.OpenMotion(); }
+            try { path = kind == PickKind.Audio ? FileDialogs.OpenAudio() : kind == PickKind.CameraMotion ? FileDialogs.OpenCameraMotion() : kind != PickKind.Motion ? FileDialogs.OpenModel() : FileDialogs.OpenMotion(); }
             catch (Exception ex) { Error = ex.Message; Refresh(); return; }
             finally { Scene.ResumeAfterInterruption(playing); }
             if (string.IsNullOrEmpty(path)) { message = "파일 선택을 취소했습니다."; Error = ""; Refresh(); return; }
@@ -36,7 +36,14 @@ namespace MmdStudio.Poc
             System.Threading.Tasks.Task<MmdSceneService.SceneObject> importTask = null;
             System.Threading.Tasks.Task motionTask = null;
             System.Threading.Tasks.Task<MmdAudioTrack> audioTask = null;
-            if (kind == PickKind.Audio)
+            System.Threading.Tasks.Task<MmdCameraMotion> cameraTask = null;
+            if (kind == PickKind.CameraMotion)
+            {
+                message = "카메라 VMD 읽는 중: " + Path.GetFileName(path); UpdateStatus();
+                cameraTask = System.Threading.Tasks.Task.Run(() => MmdCameraMotion.Load(path));
+                while (!cameraTask.IsCompleted) yield return null;
+            }
+            else if (kind == PickKind.Audio)
             {
                 loadCancellation = new System.Threading.CancellationTokenSource();
                 RefreshLoadingCard();
@@ -74,7 +81,8 @@ namespace MmdStudio.Poc
             }
             try
             {
-                if (kind == PickKind.Audio)
+                if (kind == PickKind.CameraMotion) ConnectCameraMotion(cameraTask.GetAwaiter().GetResult());
+                else if (kind == PickKind.Audio)
                 {
                     var track = audioTask.GetAwaiter().GetResult();
                     if (loadCancellation.IsCancellationRequested) { track.Dispose(); throw new OperationCanceledException(); }

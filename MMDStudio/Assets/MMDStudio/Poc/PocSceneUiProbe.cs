@@ -37,6 +37,7 @@ namespace MmdStudio.Poc
             public string OpenMotion() => Answer("OpenMotion");
             public string OpenScene() => Answer("OpenScene");
             public string OpenAudio() => Answer("OpenAudio");
+            public string OpenCameraMotion() => Answer("OpenCameraMotion");
             public string SaveScene(string suggestedName) => Answer("SaveScene:" + suggestedName);
             public string SaveText(string suggestedName) => Answer("SaveText");
         }
@@ -987,7 +988,10 @@ namespace MmdStudio.Poc
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
             string audioError = null;
             yield return AudioChecks(ui, path, sceneFile, error => audioError = error);
-            Finish(path, report, audioError);
+            if (audioError != null) { Finish(path, report, audioError); yield break; }
+            string cameraError = null;
+            yield return CameraMotionChecks(ui, path, sceneFile, error => cameraError = error);
+            Finish(path, report, cameraError);
         }
 
         // ----- H2a-03 audio -----
@@ -1208,6 +1212,227 @@ namespace MmdStudio.Poc
                     saved.sceneObjects.Count == 3 && Math.Abs(ui.Scene.Duration - Math.Max(motionDuration, length)) < 1e-9);
             }
             catch (Exception ex) { fail(ex.ToString()); }
+        }
+
+        // ----- H2a-04 camera VMD -----
+        private static MmdCameraKey CameraKey(uint frame, Vector3 target, Vector3 rotation, float distance, float angle, bool orthographic = false, Vector4? y = null)
+        {
+            var key = new MmdCameraKey { Frame = frame, Target = target, Rotation = rotation, Distance = distance, ViewAngle = angle, Orthographic = orthographic };
+            for (var c = 0; c < 6; c++) key.Curves[c] = MmdCameraMotion.LinearCurve;
+            if (y.HasValue) key.Curves[1] = y.Value;
+            return key;
+        }
+        private static bool SamePose(Camera camera, MmdCameraMotion.Pose pose, float tolerance = 1e-4f) =>
+            (camera.transform.position - pose.Position).magnitude < tolerance && Quaternion.Angle(camera.transform.rotation, pose.Rotation) < .01f &&
+            Math.Abs(camera.fieldOfView - pose.FieldOfView) < 1e-3f;
+        private IEnumerator CameraMotionChecks(MmdSceneWorkspace ui, string path, string sceneFile, Action<string> fail)
+        {
+            var dir = Path.Combine(Path.GetDirectoryName(path), "camera");
+            var fixture = Path.Combine(dir, "camera.vmd");
+            var camera = Camera.main;
+            var dialogs = new ScriptedDialogs(); var native = ui.FileDialogs;
+            MmdCameraMotion loaded;
+            try
+            {
+                if (Directory.Exists(dir)) Directory.Delete(dir, true);
+                Directory.CreateDirectory(dir);
+                // Y eases in (control points pulled to the end) while X and Z are linear: separate curves.
+                var easeIn = new Vector4(1, 0, 1, 0);
+                MmdCameraMotion.Write(fixture, new[]
+                {
+                    CameraKey(0, new Vector3(0, 10, 0), Vector3.zero, -30, 30),
+                    CameraKey(30, new Vector3(10, 20, -5), new Vector3(.2f, 1, 0), -20, 45, y: easeIn),
+                    CameraKey(31, new Vector3(0, 5, 0), new Vector3(0, Mathf.PI, 0), -10, 30),          // hard cut
+                    CameraKey(60, new Vector3(0, 5, 0), new Vector3(0, Mathf.PI, 0), -15, 30, orthographic: true),
+                }, lightKeys: 2);
+                loaded = MmdCameraMotion.Load(fixture);
+                var start = loaded.Evaluate(0);
+                var startOk = (start.Position - new Vector3(0, .8f, 2.4f)).magnitude < 1e-4f && Vector3.Angle(start.Rotation * Vector3.forward, Vector3.back) < .01f && Math.Abs(start.FieldOfView - 30) < 1e-4f;
+                var mid = loaded.Evaluate(.5);
+                var xProgress = -mid.Target.x / (10 * MmdCameraMotion.MmdUnit); var yProgress = (mid.Target.y / MmdCameraMotion.MmdUnit - 10) / 10;
+                var separate = Math.Abs(xProgress - .5f) < 2e-3f && yProgress < .3f && yProgress > 0;
+                var cutHold = loaded.Evaluate(30.5 / 30); var atKey1 = loaded.Evaluate(1); var atKey2 = loaded.Evaluate(31.0 / 30);
+                var cut = (cutHold.Position - atKey1.Position).magnitude < 1e-5f && (atKey2.Target - new Vector3(0, .4f, 0)).magnitude < 1e-5f;
+                var warnings = string.Join(" | ", loaded.Warnings);
+                Check("camera_vmd_reader_exact_per_axis_curves_and_cuts [x " + xProgress.ToString("0.000") + " y " + yProgress.ToString("0.000") + " warnings: " + warnings + "]",
+                    startOk && separate && cut && loaded.Keys.Count == 4 && Math.Abs(loaded.DurationSeconds - 2) < 1e-9 && warnings.Contains("직교") && warnings.Contains("조명"));
+
+                // Same keys as UMT's reference path can take (shared XYZ curve, no orthographic
+                // key): identical at its 60 Hz samples.
+                var reference = Path.Combine(dir, "camera-umt.vmd");
+                var rotEase = new Vector4(.6f, 0, .4f, 1);
+                var keys = new[]
+                {
+                    CameraKey(0, new Vector3(0, 10, 0), Vector3.zero, -30, 30),
+                    CameraKey(30, new Vector3(10, 20, -5), new Vector3(.2f, 1, .1f), -20, 45),
+                    CameraKey(31, new Vector3(0, 5, 0), new Vector3(0, 3, 0), -10, 30),
+                    CameraKey(90, new Vector3(-4, 12, 6), new Vector3(-.3f, -2.5f, 0), -40, 60),
+                };
+                keys[3].Curves[3] = rotEase; keys[1].Curves[4] = rotEase;
+                MmdCameraMotion.Write(reference, keys);
+                var ours = MmdCameraMotion.Load(reference);
+                float worstPosition = 0, worstAngle = 0, worstFov = 0;
+                var sample = new GameObject("Camera Reference Sample").AddComponent<Camera>(); sample.enabled = false;
+                using (var umt = new DisposableCamera(MmdPocCamera.Load(reference)))
+                {
+                    // (At the exact 60 Hz sample times the two agree within 0.001 mm on IL2CPP; 0.1 ms
+                    // later the reference adds its linear blend between samples, about 1 mm here.)
+                    // 0.1 ms after each 60 Hz sample: the reference path picks keys by float time,
+                    // which lands on either side of a cut exactly at its boundary (Mono evaluates
+                    // float maths in double precision, IL2CPP does not).
+                    for (var i = 0; i <= 179; i++)
+                    {
+                        var t = i / 60.0 + 1e-4;
+                        umt.Value.Sample(sample, (float)t);
+                        var pose = ours.Evaluate(t);
+                        worstPosition = Math.Max(worstPosition, (sample.transform.position - pose.Position).magnitude);
+                        worstAngle = Math.Max(worstAngle, Quaternion.Angle(sample.transform.rotation, pose.Rotation));
+                        worstFov = Math.Max(worstFov, Math.Abs(sample.fieldOfView - pose.FieldOfView));
+                    }
+                }
+                // The real Whiplash camera VMD (if present beside the dance VMD): every key time must
+                // match UMT; between keys UMT merges the X/Y/Z curves, so only the deviation is reported.
+                var realDetail = "real file not found";
+                var realOk = true;
+                var realPath = Path.Combine(Path.GetDirectoryName(PocArguments.Value("-pocVmd") ?? ""), "Camera [SMOOTH].vmd");
+                if (File.Exists(realPath))
+                try
+                {
+                    var real = MmdCameraMotion.Load(realPath);
+                    float keyWorst = 0, between = 0;
+                    using (var umt = new DisposableCamera(MmdPocCamera.Load(realPath)))
+                    {
+                        foreach (var key in real.Keys)
+                        {
+                            umt.Value.Sample(sample, (float)(key.Frame / 30.0 + 1e-4));
+                            keyWorst = Math.Max(keyWorst, (sample.transform.position - real.Evaluate(key.Frame / 30.0 + 1e-4).Position).magnitude);
+                        }
+                        for (var i = 0; i < real.DurationSeconds * 60; i += 7)
+                        {
+                            umt.Value.Sample(sample, (float)(i / 60.0 + 1e-4));
+                            between = Math.Max(between, (sample.transform.position - real.Evaluate(i / 60.0 + 1e-4).Position).magnitude);
+                        }
+                    }
+                    realOk = keyWorst < 1e-3f;
+                    realDetail = "real " + real.Keys.Count + " keys, at keys " + (keyWorst * 1000).ToString("0.000") + " mm, between keys (60 Hz, every 7th) max " + (between * 1000).ToString("0.0") + " mm";
+                }
+                catch (InvalidDataException ex) { realDetail = "real file not comparable with the UMT reference path: " + ex.Message; }
+                Destroy(sample.gameObject);
+                Check("camera_vmd_matches_umt_reference [synthetic 60 Hz: " + (worstPosition * 1000).ToString("0.000") + " mm, " + worstAngle.ToString("0.000") + " deg, fov " +
+                    worstFov.ToString("0.0000") + "; " + realDetail + "]", worstPosition < 2e-3f && worstAngle < .05f && worstFov < 2e-2f && realOk);
+
+                Activate(ui.Root, "explorer-camera");
+                ui.FileDialogs = dialogs;
+                dialogs.Next = fixture; Activate(ui.Root, "CameraMotionConnect");
+            }
+            catch (Exception ex) { ui.FileDialogs = native; fail(ex.ToString()); yield break; }
+            yield return null;
+            while (ui.Busy) yield return null;
+            Vector3 beforeRelease = default;
+            try
+            {
+                var motion = ui.Scene.CameraMotion;
+                ui.Scene.Seek(1.0); ui.ApplyCameraMotion();
+                Check("camera_vmd_connected_follows_scene_clock", dialogs.Asked == "OpenCameraMotion" && ui.Error.Length == 0 && motion != null && ui.CameraFollowing &&
+                    SamePose(camera, motion.Evaluate(1.0)) && ui.Root.Q<Button>("explorer-camera").text.Contains("따라가는 중") && ui.UndoLabel == "카메라 VMD 연결" &&
+                    ui.Root.Q<Label>("CameraMotionInfo").text.Contains("직교") && ui.Scene.Duration >= motion.DurationSeconds);
+                ui.Scene.Playing = true; ui.Scene.Advance(.25); ui.Scene.Playing = false; ui.ApplyCameraMotion();
+                var played = SamePose(camera, motion.Evaluate(ui.Scene.Seconds)) && Math.Abs(ui.Scene.Seconds - (1 + .25 * ui.Scene.Speed)) < 1e-9; // this scene plays at 2x
+                // Manual navigation releases the motion and continues from its pose.
+                beforeRelease = camera.transform.position;
+                var centre = new Vector2(Screen.width * .5f, Screen.height * .5f);
+                Frame(ui, centre, Vector2.zero, orbit: true);
+                var continuous = (camera.transform.position - beforeRelease).magnitude < 1e-3f;
+                Frame(ui, centre, new Vector2(30, 0), orbit: true); Frame(ui, centre, Vector2.zero);
+                var released = !ui.CameraFollowing && ui.Scene.CameraMotion == motion && !ui.Root.Q<Toggle>("CameraFollow").value &&
+                    Math.Abs(camera.fieldOfView - ui.Graphics.Settings.fieldOfView) < 1e-4f;
+                var manual = camera.transform.position;
+                ui.Scene.Seek(1.5); ui.ApplyCameraMotion();
+                var stays = (camera.transform.position - manual).magnitude < 1e-6f;
+                ui.Root.Q<Toggle>("CameraFollow").value = true;
+                var back = ui.CameraFollowing && SamePose(camera, motion.Evaluate(1.5));
+                Check("manual_navigation_releases_camera_vmd_and_follow_resumes [played=" + played + " continuous=" + continuous + " released=" + released + " stays=" + stays + " back=" + back + "]",
+                    played && continuous && released && stays && back);
+                // Rejections keep the track: a dance VMD without camera keys, a non-VMD file.
+                dialogs.Next = Path.Combine(Path.GetDirectoryName(path), "first.vmd"); Activate(ui.Root, "CameraMotionConnect");
+            }
+            catch (Exception ex) { ui.FileDialogs = native; fail(ex.ToString()); yield break; }
+            var kept = ui.Scene.CameraMotion;
+            yield return null;
+            while (ui.Busy) yield return null;
+            string danceError;
+            try
+            {
+                danceError = ui.Error;
+                dialogs.Next = Path.Combine(Path.GetDirectoryName(path), "invalid.vmd"); Activate(ui.Root, "CameraMotionConnect");
+            }
+            catch (Exception ex) { ui.FileDialogs = native; fail(ex.ToString()); yield break; }
+            yield return null;
+            while (ui.Busy) yield return null;
+            try
+            {
+                Check("camera_vmd_rejections_keep_track [" + danceError + " | " + ui.Error + "]", danceError.Contains("카메라 키가 없습니다") && ui.Error.Contains("VMD") &&
+                    ui.Scene.CameraMotion == kept && ui.CameraFollowing);
+                // Undo/redo of the connection.
+                ui.Undo();
+                var undone = ui.Scene.CameraMotion == null && !ui.CameraFollowing;
+                ui.Redo();
+                Check("camera_vmd_connect_undo_redo", undone && ui.Scene.CameraMotion == kept && ui.CameraFollowing);
+                if (!ui.SaveTo(Path.Combine(dir, "camera.mmdscene"))) throw new InvalidOperationException("camera scene save failed: " + ui.Error);
+            }
+            catch (Exception ex) { ui.FileDialogs = native; fail(ex.ToString()); yield break; }
+            var cameraScene = Path.Combine(dir, "camera.mmdscene");
+            yield return ui.OpenFrom(cameraScene);
+            var missingScene = Path.Combine(dir, "missing-camera.mmdscene");
+            try
+            {
+                var stored = MmdSceneDocument.Read(cameraScene).cameraMotion;
+                var reopened = ui.Scene.CameraMotion;
+                var ok = stored.path == "camera.vmd" && stored.follow && reopened != null && reopened != kept && ui.CameraFollowing && ui.Error.Length == 0 &&
+                    !ui.Dirty && ui.LastLoadProblems.Length == 0;
+                var file = MmdSceneDocument.Read(cameraScene); file.cameraMotion.path = "gone/camera.vmd";
+                MmdSceneDocument.Write(missingScene, file);
+                if (!ok) throw new InvalidOperationException("camera_vmd_saved_and_reopened [stored=" + stored.path + " follow=" + stored.follow + " reopened=" + (reopened != null) + " following=" + ui.CameraFollowing + " error=" + ui.Error + "]");
+            }
+            catch (Exception ex) { ui.FileDialogs = native; fail(ex.ToString()); yield break; }
+            yield return ui.OpenFrom(missingScene);
+            try
+            {
+                var listed = ui.DialogVisible && ui.LastLoadProblems.Any(p => p.Contains("gone/camera.vmd")) && ui.Scene.CameraMotion == null && !ui.CameraFollowing &&
+                    ui.UnresolvedCameraPath == "gone/camera.vmd" && ui.Root.Q<Button>("explorer-camera").text.Contains("누락");
+                Activate(ui.Root, "NoticeOk");
+                if (!ui.SaveTo(Path.Combine(dir, "sub-missing.mmdscene"))) throw new InvalidOperationException("missing camera save failed: " + ui.Error);
+                var keptPath = MmdSceneDocument.Read(Path.Combine(dir, "sub-missing.mmdscene")).cameraMotion.path == "gone/camera.vmd";
+                Check("camera_vmd_saved_reopened_and_missing_kept [listed=" + listed + " kept=" + keptPath + "]", listed && keptPath);
+            }
+            catch (Exception ex) { ui.FileDialogs = native; fail(ex.ToString()); yield break; }
+            // The main scene keeps the camera VMD, released (the relaunch check compares the
+            // manual view and the graphics FOV with the camera).
+            yield return ui.OpenFrom(sceneFile);
+            try
+            {
+                Activate(ui.Root, "explorer-camera");
+                dialogs.Next = fixture; Activate(ui.Root, "CameraMotionConnect");
+            }
+            catch (Exception ex) { ui.FileDialogs = native; fail(ex.ToString()); yield break; }
+            yield return null;
+            while (ui.Busy) yield return null;
+            try
+            {
+                ui.FileDialogs = native;
+                ui.Root.Q<Toggle>("CameraFollow").value = false;
+                if (!ui.SaveTo(sceneFile)) throw new InvalidOperationException("scene save with camera failed: " + ui.Error);
+                var saved = MmdSceneDocument.Read(sceneFile);
+                Check("scene_with_camera_vmd_saved_for_relaunch", saved.cameraMotion.path == "../camera/camera.vmd" && !saved.cameraMotion.follow &&
+                    saved.audio.path == "../audio/song.wav" && saved.sceneObjects.Count == 3);
+            }
+            catch (Exception ex) { fail(ex.ToString()); }
+        }
+        private sealed class DisposableCamera : IDisposable
+        {
+            public readonly MmdPocCamera Value;
+            public DisposableCamera(MmdPocCamera value) { Value = value; }
+            public void Dispose() => Value?.Dispose();
         }
         private static bool Near(Vector3 x, Vector3 y, float tolerance = 1e-3f) => (x - y).magnitude <= tolerance;
         private static bool Near(float x, float y, float tolerance = 1e-3f) => Math.Abs(x - y) <= tolerance;

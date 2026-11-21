@@ -25,6 +25,7 @@ namespace MmdStudio.Poc
             TextButton(viewRow, "SaveView", "현재 시점 저장", () => Guard(SaveView), "eds-button--block").style.marginRight = 6;
             TextButton(viewRow, "ResetView", "뷰 초기화", () => Guard(ResetView), "eds-button--block");
             savedViewList = new VisualElement { name = "SavedViews" }; savedViewList.style.marginTop = 6; cameraSection.Add(savedViewList);
+            BuildCameraMotionControls(cameraSection);
 
             lightSection = Section(content, "LightSection", "조명 · 방향광");
             GraphicsSlider(lightSection, "LightR", "색 R", 0, 1, s => s.lightColor.r, (s, v) => s.lightColor.r = v);
@@ -180,6 +181,7 @@ namespace MmdStudio.Poc
             var next = Graphics.Settings;
             if (index < 0 || index >= next.savedViews.Count) throw new ArgumentOutOfRangeException(nameof(index), "저장된 시점을 찾을 수 없습니다.");
             var view = next.savedViews[index];
+            ReleaseCameraMotion();
             View.Set(view.pivot, view.yaw, view.pitch, view.distance);
             next.fieldOfView = view.fieldOfView; Graphics.Apply(next);
             View.Apply(Camera.main); message = view.name + "(으)로 이동했습니다.";
@@ -192,6 +194,7 @@ namespace MmdStudio.Poc
         }
         private void ResetView()
         {
+            ReleaseCameraMotion();
             View.Reset(); FrameAll(); View.Apply(Camera.main); message = "뷰를 초기화했습니다.";
         }
         private void RefreshGraphics()

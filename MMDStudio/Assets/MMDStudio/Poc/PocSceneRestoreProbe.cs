@@ -65,6 +65,9 @@ namespace MmdStudio.Poc
                 Check("audio_restored_with_volume", !string.IsNullOrEmpty(file.audio.path) && ui.Scene.Audio != null && ui.UnresolvedAudioPath == null &&
                     SamePath(ui.Scene.Audio.Source, MmdSceneDocument.Resolve(sceneFile, file.audio.path)) &&
                     ui.Scene.AudioVolume == file.audio.volume && ui.Scene.AudioMuted == file.audio.muted);
+                // H2a-04: the UI probe saves the scene with a camera VMD, released (manual view).
+                Check("camera_vmd_restored_with_follow_state", !string.IsNullOrEmpty(file.cameraMotion.path) && ui.Scene.CameraMotion != null && ui.UnresolvedCameraPath == null &&
+                    SamePath(ui.Scene.CameraMotion.Source, MmdSceneDocument.Resolve(sceneFile, file.cameraMotion.path)) && ui.CameraFollowing == file.cameraMotion.follow);
                 Check("characters_sampled_at_restored_time", ui.Scene.Objects.Where(item => item.Motion != null).All(item => Math.Abs(item.Motion.TimeSeconds - (float)ui.Scene.Seconds) < 1e-4f));
                 report.screenshot = Path.Combine(Path.GetDirectoryName(reportPath), "scene-restore.png");
                 ScreenCapture.CaptureScreenshot(report.screenshot);

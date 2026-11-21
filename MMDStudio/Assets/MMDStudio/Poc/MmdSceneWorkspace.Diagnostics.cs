@@ -70,6 +70,8 @@ namespace MmdStudio.Poc
                          " · 실행 취소 " + UndoCount);
             b.AppendLine("오디오: " + (Scene.Audio != null ? Path.GetFileName(Scene.Audio.Source) + " · " + Scene.Audio.Format :
                 UnresolvedAudioPath != null ? "누락 (" + Path.GetFileName(UnresolvedAudioPath) + ")" : "없음"));
+            b.AppendLine("카메라 VMD: " + (Scene.CameraMotion != null ? Path.GetFileName(Scene.CameraMotion.Source) + " · 키 " + Scene.CameraMotion.Keys.Count + (CameraFollowing ? " · 따라가는 중" : " · 해제됨") :
+                UnresolvedCameraPath != null ? "누락 (" + Path.GetFileName(UnresolvedCameraPath) + ")" : "없음"));
             b.AppendLine("장면 파일: " + (ProjectPath == null ? "(새 장면)" : Path.GetFileName(ProjectPath)));
             b.AppendLine();
             b.AppendLine("[로그]");

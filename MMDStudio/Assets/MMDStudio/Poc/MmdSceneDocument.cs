@@ -29,6 +29,15 @@ namespace MmdStudio.Poc
         public SceneGraphicsSettings graphics = new SceneGraphicsSettings();
         public TimelineData timeline = new TimelineData();
         public AudioData audio = new AudioData();
+        public CameraMotionData cameraMotion = new CameraMotionData();
+    }
+
+    // H2a-04 (additive in schema 2): camera VMD reference and whether the view follows it.
+    [Serializable]
+    public sealed class CameraMotionData
+    {
+        public string path = "";
+        public bool follow;
     }
 
     [Serializable]
@@ -218,6 +227,9 @@ namespace MmdStudio.Poc
             if (scene.audio.path == null) scene.audio.path = "";
             if (scene.audio.path.Length > 0) CheckPath(scene.audio.path, ".wav");
             if (!Finite(scene.audio.volume) || scene.audio.volume < 0 || scene.audio.volume > 1) throw new InvalidDataException("오디오 음량이 올바르지 않습니다.");
+            if (scene.cameraMotion == null) scene.cameraMotion = new CameraMotionData();
+            if (scene.cameraMotion.path == null) scene.cameraMotion.path = "";
+            if (scene.cameraMotion.path.Length > 0) CheckPath(scene.cameraMotion.path, ".vmd");
         }
         private static void CheckPath(string value, string extension)
         {

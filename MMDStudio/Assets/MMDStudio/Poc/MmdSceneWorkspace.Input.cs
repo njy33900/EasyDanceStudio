@@ -62,11 +62,12 @@ namespace MmdStudio.Poc
         void IViewportInputTarget.EndGizmoDrag() => EndGizmoDrag();
         void IViewportInputTarget.UpdateGizmoHover(Vector2 screen, bool overViewport) => UpdateGizmoHover(screen, overViewport);
         void IViewportInputTarget.ClickAt(Vector2 screen) => SelectFromViewport(PickAt(screen));
-        void IViewportInputTarget.Orbit(Vector2 delta) => View.Orbit(delta);
-        void IViewportInputTarget.Pan(Vector2 delta) => View.Pan(delta, Camera.main.pixelHeight, Camera.main.fieldOfView);
-        void IViewportInputTarget.Zoom(float notches) => View.Zoom(notches);
+        // H2a-04: manual navigation has priority over a camera VMD (releases it first).
+        void IViewportInputTarget.Orbit(Vector2 delta) { ReleaseCameraMotion(); View.Orbit(delta); }
+        void IViewportInputTarget.Pan(Vector2 delta) { ReleaseCameraMotion(); View.Pan(delta, Camera.main.pixelHeight, Camera.main.fieldOfView); }
+        void IViewportInputTarget.Zoom(float notches) { ReleaseCameraMotion(); View.Zoom(notches); }
         void IViewportInputTarget.ApplyView() => View.Apply(Camera.main);
-        void IViewportInputTarget.FrameSelection() => FrameSelected();
+        void IViewportInputTarget.FrameSelection() { ReleaseCameraMotion(); FrameSelected(); }
         void IViewportInputTarget.TogglePlay() { if (Scene.Duration > 0) Guard(() => Scene.Playing = !Scene.Playing); }
         void IViewportInputTarget.RequestDelete() { if (Selected != null || SelectedUnresolved != null) RequestRemove(); }
         void IViewportInputTarget.Save() => Guard(() => Save());

@@ -15,7 +15,7 @@ namespace MmdStudio.Poc
         public bool Busy { get; private set; }
         internal VisualElement Root { get; private set; }
         private ScrollView list;
-        public enum PickKind { Character, Stage, Motion, Audio }
+        public enum PickKind { Character, Stage, Motion, Audio, CameraMotion }
         // What the inspector shows: a scene object (SelectedId), the light, or the camera.
         public enum InspectorTarget { Object, Light, Camera, Audio }
         public InspectorTarget Target { get; private set; }
@@ -91,7 +91,7 @@ namespace MmdStudio.Poc
             Element(topbar, "eds-spacer").pickingMode = PickingMode.Ignore;
             BuildProjectToolbar(topbar);
             Element(topbar, "eds-divider-v");
-            IconButton(topbar, "FrameAll", MmdIconKind.Frame, "전체 보기 — 보이는 모든 항목에 카메라 맞춤", () => Guard(FrameAll));
+            IconButton(topbar, "FrameAll", MmdIconKind.Frame, "전체 보기 — 보이는 모든 항목에 카메라 맞춤", () => Guard(() => { ReleaseCameraMotion(); FrameAll(); }));
 
             var body = Element(Root, "eds-body"); body.pickingMode = PickingMode.Ignore;
 
@@ -294,7 +294,7 @@ namespace MmdStudio.Poc
             }
             Text(list, "환경", "eds-tree-group");
             ExplorerRow(list, "explorer-light", "조명", MmdIconKind.Light, () => SelectTarget(InspectorTarget.Light), Target == InspectorTarget.Light);
-            ExplorerRow(list, "explorer-camera", "카메라", MmdIconKind.Camera, () => SelectTarget(InspectorTarget.Camera), Target == InspectorTarget.Camera);
+            ExplorerRow(list, "explorer-camera", "카메라" + (Scene.CameraMotion != null ? (CameraFollowing ? " · VMD 따라가는 중" : " · VMD") : UnresolvedCameraPath != null ? " (VMD 누락)" : ""), MmdIconKind.Camera, () => SelectTarget(InspectorTarget.Camera), Target == InspectorTarget.Camera);
             var audioRow = ExplorerRow(list, "explorer-audio", AudioExplorerLabel, MmdIconKind.Audio, () => SelectTarget(InspectorTarget.Audio), Target == InspectorTarget.Audio);
             if (UnresolvedAudioPath != null && Scene.Audio == null) audioRow.AddToClassList("eds-row--missing");
 
@@ -346,6 +346,7 @@ namespace MmdStudio.Poc
             UpdateHighlight();
             RefreshGraphics();
             RefreshAudio();
+            RefreshCameraMotion();
             RefreshGizmo();
         }
         private Button ExplorerRow(VisualElement parent, string name, string text, MmdIconKind icon, Action action, bool selected)
@@ -441,6 +442,7 @@ namespace MmdStudio.Poc
         // Renderer bounds follow the skinned root; also refreshed immediately by Refresh().
         private void LateUpdate()
         {
+            ApplyCameraMotion();
             UpdateHighlight();
             UpdateDofFocus();
             // The camera or a placement may have moved: redraw the gizmo while it exists.
