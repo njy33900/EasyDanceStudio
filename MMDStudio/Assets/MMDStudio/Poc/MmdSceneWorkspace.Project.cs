@@ -131,7 +131,13 @@ namespace MmdStudio.Poc
             if (Busy) return false;
             var full = Path.GetFullPath(path);
             if (!string.Equals(Path.GetExtension(full), MmdSceneDocument.Extension, StringComparison.OrdinalIgnoreCase)) full += MmdSceneDocument.Extension;
-            MmdSceneDocument.Write(full, Capture(full));
+            try { MmdSceneDocument.Write(full, Capture(full)); }
+            catch (Exception ex) when (ex is UnauthorizedAccessException || ex is IOException)
+            {
+                // Read-only file, no permission, full disk, network loss: the original is untouched
+                // (atomic replace) and the scene stays unsaved.
+                throw new InvalidOperationException("저장하지 못했습니다(읽기 전용·권한·디스크 문제일 수 있습니다): " + Path.GetFileName(full) + " · 원래 파일은 그대로입니다. 다른 이름으로 저장해 보세요.", ex);
+            }
             RebaseUnresolved(full);
             ProjectPath = full; MarkSaved(); Error = "";
             message = "저장했습니다: " + Path.GetFileName(full);
@@ -159,10 +165,12 @@ namespace MmdStudio.Poc
                     type = item.Kind == MmdSceneService.ObjectKind.Stage ? SceneObjectData.StageType : SceneObjectData.CharacterType,
                     assetPath = MmdSceneDocument.ToStored(sceneFile, item.ModelSource), motionPath = motion,
                     position = item.Placement.localPosition, rotationEuler = item.Placement.localEulerAngles, scale = item.Placement.localScale,
-                    visible = item.Visible, physics = item.PhysicsEnabled,
-                    physicsParts = item.PhysicsStrength.Count == 0 ? null : item.PhysicsStrength.Keys.ToArray(),
-                    physicsStrength = item.PhysicsStrength.Count == 0 ? null : item.PhysicsStrength.Values.ToArray(),
-                    springPreset = item.SpringPreset,
+                    visible = item.Visible,
+                    physics = new PhysicsData
+                    {
+                        enabled = item.PhysicsEnabled, spring = item.SpringPreset ?? "",
+                        strength = item.PhysicsStrength.Select(entry => new PartStrength { part = entry.Key, value = entry.Value }).ToList(),
+                    },
                 };
             }
             SceneObjectData Missing(UnresolvedItem item)
@@ -219,7 +227,8 @@ namespace MmdStudio.Poc
             Busy = true; Error = ""; message = "장면을 불러오는 중…"; Scene.Playing = false; Refresh();
             yield return null;
             SceneFile file;
-            try { file = MmdSceneDocument.Read(path); }
+            var migratedFrom = 0;
+            try { file = MmdSceneDocument.Read(path); migratedFrom = MmdSceneDocument.MigratedFromVersion; }
             catch (Exception ex)
             {
                 Busy = false; Scene.ResumeAfterInterruption(playing);
@@ -299,13 +308,11 @@ namespace MmdStudio.Poc
                     {
                         var live = Scene.Objects.FirstOrDefault(item => item.Id == data.id);
                         if (live == null) continue;
-                        if (data.physicsParts != null && data.physicsStrength != null)
-                            for (var p = 0; p < Math.Min(data.physicsParts.Length, data.physicsStrength.Length); p++)
-                                if (Array.IndexOf(MmdPhysicsParts.Order, data.physicsParts[p]) >= 0)
-                                    Scene.SetPhysicsStrength(live.Id, data.physicsParts[p], Mathf.Clamp01(data.physicsStrength[p]));
-                        if (data.physics && live.Motion != null) Scene.SetPhysics(live.Id, true);
-                        if (!string.IsNullOrEmpty(data.springPreset) && Array.IndexOf(MmdSpringBones.PresetIds, data.springPreset) >= 0 &&
-                            live.Motion != null && live.SpringAvailable) Scene.SetSpring(live.Id, data.springPreset);
+                        var physics = data.physics ?? new PhysicsData();
+                        foreach (var entry in physics.strength ?? new List<PartStrength>())
+                            Scene.SetPhysicsStrength(live.Id, entry.part, Mathf.Clamp01(entry.value));
+                        if (physics.enabled && live.Motion != null) Scene.SetPhysics(live.Id, true);
+                        if (!string.IsNullOrEmpty(physics.spring) && live.Motion != null && live.SpringAvailable) Scene.SetSpring(live.Id, physics.spring);
                     }
                     Graphics.Apply(file.graphics);
                     View.Set(file.view.pivot, file.view.yaw, file.view.pitch, file.view.distance); View.Apply(Camera.main);
@@ -316,7 +323,9 @@ namespace MmdStudio.Poc
                     Target = InspectorTarget.Object;
                     ClearHistory();
                     ProjectPath = full; projectId = file.projectId; Dirty = false;
-                    message = "장면을 불러왔습니다: " + Path.GetFileName(path);
+                    message = "장면을 불러왔습니다: " + Path.GetFileName(path) +
+                        (migratedFrom > 0 ? " · 이전 형식(schema " + migratedFrom + ") 파일입니다. 저장하면 새 형식으로 기록되며, 그 전까지 원본은 바뀌지 않습니다." : "");
+                    LastOpenMigratedFrom = migratedFrom;
                     LastLoadProblems = problems.ToArray();
                     if (problems.Count > 0)
                         ShowDialog("일부 항목을 불러오지 못했습니다. 나머지 장면은 열렸습니다.\n" + string.Join("\n", problems.Take(8)) +
@@ -337,6 +346,8 @@ namespace MmdStudio.Poc
             }
         }
         internal float SceneOpenSeconds { get; private set; }
+        // H1-05: schema version the last opened file was migrated from (0: current).
+        internal int LastOpenMigratedFrom { get; private set; }
         internal string[] LastLoadProblems { get; private set; } = new string[0];
 
         // ----- Unsaved changes -----

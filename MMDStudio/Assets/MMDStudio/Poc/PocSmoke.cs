@@ -60,6 +60,7 @@ namespace MmdStudio.Poc
                 var cycleReport = PocArguments.Value("-pocSceneCycleReport");
                 var physicsShots = PocArguments.Value("-pocPhysicsShots");
                 var recoveryWrite = PocArguments.Value("-pocRecoveryWrite");
+                var formatReport = PocArguments.Value("-pocSceneFormatReport");
                 var recoveryCheck = PocArguments.Value("-pocRecoveryCheck");
                 var sceneFile = PocArguments.Value("-sceneFile");
                 var legacyProbe = PocArguments.HasAny("-pocRecoveryReport", "-pocCameraReport", "-pocDeformationReport",
@@ -67,13 +68,14 @@ namespace MmdStudio.Poc
                     "-pocPhysicsLifecycleReport", "-pocPhysicsFeatureReport", "-pocPhysicsRealMotionReport", "-pocSceneReport");
                 // Double-clicking the current Player opens the studio. Older diagnostic
                 // routes remain explicit so their probes and single-model launcher still work.
-                if (sceneUiReport != null || restoreReport != null || perfReport != null || cycleReport != null || physicsShots != null || recoveryWrite != null || recoveryCheck != null || sceneFile != null ||
+                if (sceneUiReport != null || restoreReport != null || perfReport != null || cycleReport != null || physicsShots != null || recoveryWrite != null || recoveryCheck != null || formatReport != null || sceneFile != null ||
                     PocArguments.Has("-sceneUi") || (!PocArguments.Has("-legacyWorkspace") && !legacyProbe))
                 {
                     var sceneUi = gameObject.AddComponent<MmdSceneWorkspace>(); sceneUi.Initialize();
                     Debug.Log("EasyDanceStudio: scene workspace started.");
                     if (sceneUiReport != null) yield return gameObject.AddComponent<PocSceneUiProbe>().Run(sceneUi, sceneUiReport);
                     else if (restoreReport != null) yield return gameObject.AddComponent<PocSceneRestoreProbe>().Run(sceneUi, restoreReport, sceneFile);
+                    else if (formatReport != null) yield return gameObject.AddComponent<PocSceneFormatProbe>().Run(sceneUi, formatReport, sceneFile);
                     else if (recoveryWrite != null) yield return gameObject.AddComponent<PocSceneRecoveryProbe>().Write(sceneUi, recoveryWrite, sceneFile);
                     else if (recoveryCheck != null) yield return gameObject.AddComponent<PocSceneRecoveryProbe>().CheckRestore(sceneUi, recoveryCheck, PocArguments.Value("-pocRecoveryExpect"), PocArguments.Has("-pocRecoveryDiscard"));
                     else if (physicsShots != null) yield return gameObject.AddComponent<PocPhysicsShotProbe>().Run(sceneUi, physicsShots);

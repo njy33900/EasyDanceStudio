@@ -569,7 +569,7 @@ namespace MmdStudio.Poc
                 Check("physics_rebakes_after_placement_change", a.PhysicsReady);
                 if (!ui.SaveTo(physicsFile)) throw new InvalidOperationException("physics scene save failed: " + ui.Error);
                 var saved = MmdSceneDocument.Read(physicsFile);
-                if (!saved.sceneObjects.First(o => o.id == a.Id).physics || saved.sceneObjects.First(o => o.id == b.Id).physics)
+                if (!saved.sceneObjects.First(o => o.id == a.Id).physics.enabled || saved.sceneObjects.First(o => o.id == b.Id).physics.enabled)
                     throw new InvalidOperationException("physics flag not saved per character");
             }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
@@ -616,8 +616,8 @@ namespace MmdStudio.Poc
                     report.springPoseDifferenceM > 1e-4f && springOn.Zip(springAgain, (x, y) => Vector3.Distance(x, y)).Max() == 0 && report.springZeroDifferenceM < 1e-4f);
                 if (!ui.SaveTo(physicsFile)) throw new InvalidOperationException("spring scene save failed: " + ui.Error);
                 var saved = MmdSceneDocument.Read(physicsFile);
-                Check("spring_preset_saved_per_character", saved.sceneObjects.First(o => o.id == springTarget.Id).springPreset == "medium" &&
-                    saved.sceneObjects.Where(o => o.id != springTarget.Id).All(o => string.IsNullOrEmpty(o.springPreset)));
+                Check("spring_preset_saved_per_character", saved.sceneObjects.First(o => o.id == springTarget.Id).physics.spring == "medium" &&
+                    saved.sceneObjects.Where(o => o.id != springTarget.Id).All(o => string.IsNullOrEmpty(o.physics.spring)));
             }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
             // Back to the main scene file for the remaining checks.
@@ -694,7 +694,7 @@ namespace MmdStudio.Poc
             {
                 Check("corrupt_file_rejected_and_scene_kept", ui.Error.Contains("열 수 없습니다") && ui.Scene.Objects.Select(item => item.Id).SequenceEqual(ids) &&
                     string.Equals(ui.ProjectPath, Path.GetFullPath(sceneFile), StringComparison.OrdinalIgnoreCase));
-                File.WriteAllText(Path.Combine(project, "future.mmdscene"), File.ReadAllText(sceneFile).Replace("\"schemaVersion\": 1", "\"schemaVersion\": 99"));
+                File.WriteAllText(Path.Combine(project, "future.mmdscene"), File.ReadAllText(sceneFile).Replace("\"schemaVersion\": " + SceneFile.CurrentSchemaVersion, "\"schemaVersion\": 99"));
             }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
             yield return ui.OpenFrom(Path.Combine(project, "future.mmdscene"));
