@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Diagnostics (H1-08): "진단" in the top bar shows version, build, backend, OS, CPU, GPU, display, a scene summary and recent errors/warnings. The text shown can be exported to a file, and the log folder can be opened. No model contents or machine name; the user profile folder is masked.
 - Recent scenes (H1-07): a "최근 장면" toolbar button lists up to 10 recently opened or saved scenes, newest first. Missing files are marked and can be removed one by one or all at once; the list stores paths only, in the app settings folder.
 - Relink missing files (H1-02): "파일 다시 찾기" in the inspector reloads a missing PMX from a new path with the same ID, placement, visibility, motion path and physics settings, in its document position; still-missing motions stay marked; undoable.
 - Scene file schema 2 (H1-05): per-object physics, part strengths and body-motion preset live in a validated `physics` block. Schema 1 files open migrated in memory (the original is untouched until saved); newer versions are rejected. Save failures (read-only, permission, disk) show a clear message and keep the original and the unsaved state. Verified with schema 1 migration, Korean/space/special-character folders, another drive and a read-only file (`scripts/bash/run-scene-format.sh`); network paths not tested. Older builds cannot open schema 2 files.

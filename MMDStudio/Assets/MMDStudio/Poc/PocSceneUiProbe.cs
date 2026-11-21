@@ -534,6 +534,42 @@ namespace MmdStudio.Poc
                     ui.Scene.Objects.Select(item => item.Id).SequenceEqual(ids) && a != null && b != null && stage != null);
             }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            var diagnosticsOk = false; var diagnosticsDetail = "";
+            // H1-08: diagnostics dialog — version/backend/OS/GPU/recent warnings, user folder masked,
+            // exported text equals what was shown, log folder button present (not pressed: it opens Explorer).
+            try
+            {
+                var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                Debug.LogWarning("diagnostics probe marker " + Path.Combine(profile, "marker.pmx"));
+                Activate(ui.Root, "Diagnostics");
+                var body = ui.Root.Q<Label>("DiagnosticsBody");
+                var text = body?.text ?? "";
+#if ENABLE_IL2CPP
+                var backendShown = text.Contains("IL2CPP");
+#else
+                var backendShown = text.Contains("Mono");
+#endif
+                var shown = ui.DialogVisible && body != null && body.selection.isSelectable && backendShown && text.Contains(SystemInfo.operatingSystem) &&
+                    text.Contains(SystemInfo.graphicsDeviceName) && text.Contains("diagnostics probe marker %USERPROFILE%") &&
+                    text.IndexOf(profile, StringComparison.OrdinalIgnoreCase) < 0 && !text.Contains(Environment.MachineName + " ") &&
+                    text.Contains("캐릭터 2 · 배경 1") && text.Contains("scene.mmdscene") && text.Contains("로그 파일:") &&
+                    ui.Root.Q<Button>("DiagnosticsExport") != null && ui.Root.Q<Button>("DiagnosticsOpenLog") != null;
+                var exported = Path.Combine(Path.GetDirectoryName(path), "diagnostics.txt");
+                if (File.Exists(exported)) File.Delete(exported);
+                var wrote = ui.ExportDiagnostics(exported) && File.ReadAllText(exported).Replace("\r\n", "\n") == text.Replace("\r\n", "\n");
+                diagnosticsOk = shown && wrote;
+                diagnosticsDetail = diagnosticsOk ? "" : " [shown=" + shown + " wrote=" + wrote + "]";
+                ScreenCapture.CaptureScreenshot(Path.Combine(Path.GetDirectoryName(path), "scene-ui-diagnostics.png"));
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return null; yield return null; // the screenshot is taken at the end of the frame
+            try
+            {
+                ui.ProcessViewportInput(new Vector2(-10, -10), Vector2.zero, 0, false, false, false, cancelKey: true);
+                Check("diagnostics_shown_masked_and_exported" + diagnosticsDetail, diagnosticsOk && !ui.DialogVisible && ui.Error.Length == 0);
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return new WaitForSecondsRealtime(.2f);
 
             // H1-01c: cancel a scene open during its second entry; the running scene must be untouched.
             yield return null; // let owners released by the previous open finish their deferred Destroy

@@ -384,7 +384,7 @@ namespace MmdStudio.Poc
         private void ShowDialog(string text, Action cancel, params (string name, string label, Action action)[] buttons)
         {
             dialogText.text = text; dialogButtons.Clear(); dialogCancel = cancel;
-            dialogContent.Clear(); dialogContent.style.display = DisplayStyle.None;
+            dialogContent.Clear(); dialogContent.style.display = DisplayStyle.None; dialogContent.parent.RemoveFromClassList("eds-dialog--wide");
             for (var i = 0; i < buttons.Length; i++)
             {
                 var (name, label, action) = buttons[i]; var act = action;

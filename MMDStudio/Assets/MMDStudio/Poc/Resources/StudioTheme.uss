@@ -175,6 +175,9 @@
 .eds-dialog-text { white-space: normal; color: #18181B; font-size: 13px; margin-bottom: 16px; }
 .eds-dialog-buttons { flex-direction: row; justify-content: flex-end; }
 .eds-dialog-content { margin: -6px 0 14px 0; }
+.eds-dialog--wide { width: 680px; }
+.eds-diagnostics-scroll { height: 360px; border-width: 1px; border-color: #E4E4E7; border-radius: 6px; }
+.eds-diagnostics { margin: 0; padding: 8px 10px; font-size: 11px; white-space: normal; color: #27272A; background-color: #FAFAFA; }
 .eds-recent-row { flex-direction: row; align-items: center; margin: 1px 0; }
 .eds-recent-open { flex-grow: 1; flex-shrink: 1; height: 40px; margin: 0; padding: 3px 8px; border-width: 0; border-radius: 6px; background-color: rgba(0, 0, 0, 0);
     -unity-text-align: upper-left; color: #18181B; font-size: 13px; overflow: hidden; }

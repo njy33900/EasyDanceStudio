@@ -36,6 +36,7 @@ namespace MmdStudio.Poc
                 RefreshPanelVisibility();
             });
             TextButton(topbar, "FocusViewToggle", "집중 보기  H", () => SetFocusView(true));
+            TextButton(topbar, "Diagnostics", "진단", ShowDiagnostics).tooltip = "진단 정보 보기·내보내기, 로그 폴더 열기";
             HideButton(topbar, "HideTopBar", "TopBar");
             viewMenu = Element(Root, "eds-view-menu"); viewMenu.name = "ViewMenu";
             AddPanelButton("TopBar", "상단 도구 모음");
