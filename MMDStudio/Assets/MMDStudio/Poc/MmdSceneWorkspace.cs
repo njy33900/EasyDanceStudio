@@ -354,6 +354,7 @@ namespace MmdStudio.Poc
             RefreshLook();
             RefreshMaterial();
             RefreshCameraMotion();
+            RefreshAutoCamera();
             RefreshGizmo();
         }
         private Button ExplorerRow(VisualElement parent, string name, string text, MmdIconKind icon, Action action, bool selected)

@@ -39,6 +39,8 @@ namespace MmdStudio.Poc
     {
         public string path = "";
         public bool follow;
+        // D-01: generator version, inputs and seed when the VMD was made by the automatic camera.
+        public AutoCameraSettings generator = new AutoCameraSettings { version = 0 };
     }
 
     [Serializable]
@@ -238,6 +240,12 @@ namespace MmdStudio.Poc
             if (scene.cameraMotion == null) scene.cameraMotion = new CameraMotionData();
             if (scene.cameraMotion.path == null) scene.cameraMotion.path = "";
             if (scene.cameraMotion.path.Length > 0) CheckPath(scene.cameraMotion.path, ".vmd");
+            if (scene.cameraMotion.generator == null) scene.cameraMotion.generator = new AutoCameraSettings { version = 0 };
+            else if (scene.cameraMotion.generator.version > 0)
+            {
+                try { scene.cameraMotion.generator.Validate(); }
+                catch (ArgumentException ex) { throw new InvalidDataException("자동 카메라 설정이 올바르지 않습니다: " + ex.Message, ex); }
+            }
             if (scene.output == null) scene.output = new OutputData();
             try { scene.output.Validate(); }
             catch (ArgumentException ex) { throw new InvalidDataException("출력 설정이 올바르지 않습니다: " + ex.Message, ex); }

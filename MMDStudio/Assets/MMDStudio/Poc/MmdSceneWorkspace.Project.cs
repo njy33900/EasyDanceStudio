@@ -348,6 +348,7 @@ namespace MmdStudio.Poc
                     ClearHistory();
                     ResetAudio(audio.Track, audio.Missing, file.audio.volume, file.audio.muted);
                     ResetCameraMotion(cameraMotion.Motion, cameraMotion.Missing, file.cameraMotion.follow);
+                    RestoreAutoCamera(file.cameraMotion.generator, full);
                     SetOutput(file.output);
                     Scene.Loop = file.timeline.loop; Scene.Speed = file.timeline.speed;
                     Scene.Playing = false; Scene.Seek(Math.Min(file.timeline.timeSeconds, Scene.Duration));

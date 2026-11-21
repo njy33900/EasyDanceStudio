@@ -998,7 +998,10 @@ namespace MmdStudio.Poc
             if (cameraError != null) { Finish(path, report, cameraError); yield break; }
             string outputError = null;
             yield return OutputChecks(ui, path, sceneFile, error => outputError = error);
-            Finish(path, report, outputError);
+            if (outputError != null) { Finish(path, report, outputError); yield break; }
+            string autoError = null;
+            yield return AutoCameraChecks(ui, path, error => autoError = error);
+            Finish(path, report, autoError);
         }
 
         // ----- H2a-03 audio -----
@@ -1819,6 +1822,155 @@ namespace MmdStudio.Poc
             catch (Exception ex) { fail(ex.ToString()); }
         }
         private ScriptedDialogs outputDialogs;
+        // ----- D-01 beat-based automatic camera -----
+        // Synthetic dance loop at a known tempo: kick on every beat (accented on the downbeat),
+        // snare on 2 and 4, hi-hat on the off-beats, low noise. Returns the true beat times.
+        private static float[] DanceLoop(int rate, double seconds, double bpm, double offset, int seed, out List<double> truth)
+        {
+            var random = new System.Random(seed);
+            var samples = new float[(int)(rate * seconds)];
+            for (var i = 0; i < samples.Length; i++) samples[i] = (float)(random.NextDouble() * 2 - 1) * .02f;
+            truth = new List<double>();
+            var period = 60 / bpm;
+            for (var k = 0; offset + k * period < seconds - .3; k++)
+            {
+                var at = offset + k * period; truth.Add(at);
+                var start = (int)(at * rate);
+                var accent = k % 4 == 0 ? .9f : .6f;
+                for (var i = 0; i < rate * .25 && start + i < samples.Length; i++)
+                {
+                    var t = i / (double)rate;
+                    samples[start + i] += accent * (float)(Math.Sin(2 * Math.PI * (60 - 40 * t) * t) * Math.Exp(-t / .12));
+                    if (k % 2 == 1) samples[start + i] += .3f * (float)((random.NextDouble() * 2 - 1) * Math.Exp(-t / .08));
+                }
+                var hat = (int)((at + period / 2) * rate);
+                for (var i = 0; i < rate * .05 && hat + i < samples.Length; i++)
+                    samples[hat + i] += .15f * (float)((random.NextDouble() * 2 - 1) * Math.Exp(-i / (rate * .02)));
+            }
+            for (var i = 0; i < samples.Length; i++) samples[i] = Mathf.Clamp(samples[i], -1, 1);
+            return samples;
+        }
+        private IEnumerator AutoCameraChecks(MmdSceneWorkspace ui, string path, Action<string> fail)
+        {
+            var dir = Path.Combine(Path.GetDirectoryName(path), "autocam");
+            var music = Path.Combine(dir, "dance-128.wav");
+            List<double> truth128 = null;
+            try
+            {
+                if (Directory.Exists(dir)) Directory.Delete(dir, true);
+                Directory.CreateDirectory(dir);
+                // 1. Known tempos: BPM, beat phase and bar lines.
+                var details = new List<string>(); var ok = true;
+                foreach (var (bpm, offset, seed) in new[] { (128.0, .37, 1), (96.0, .12, 2), (150.0, .05, 3) })
+                {
+                    var samples = DanceLoop(44100, 20, bpm, offset, seed, out var truth);
+                    var info = MmdBeatAnalyzer.Analyze(samples, 1, 44100);
+                    var phase = info.Beats.Select(b => truth.Min(t => Math.Abs(t - b))).Where(e => e < .25).DefaultIfEmpty(1).Average();
+                    var downbeats = truth.Where((t, k) => k % 4 == 0).ToList();
+                    // Bar lines must sit on beats; which beat is "1" (downbeat) is reported, not required.
+                    var onBeats = info.Bars.Count(x => truth.Any(t => Math.Abs(t - x) < .03)) / (double)Math.Max(1, info.Bars.Length);
+                    var barsOk = info.Bars.Count(x => downbeats.Any(d => Math.Abs(d - x) < .03)) / (double)Math.Max(1, info.Bars.Length);
+                    ok &= Math.Abs(info.Bpm - bpm) < .5 && phase < .015 && onBeats >= .9;
+                    details.Add(bpm + ": " + info.Bpm.ToString("0.00") + " BPM, phase " + (phase * 1000).ToString("0.0") + " ms, bar lines on beats " + (onBeats * 100).ToString("0") +
+                        "%, on downbeats " + (barsOk * 100).ToString("0") + "%, confidence " + info.Confidence.ToString("0.0"));
+                    if (bpm == 128) { truth128 = truth; MmdWavReader.Write(music, samples, 1, 44100); }
+                }
+                Check("beat_analysis_on_known_tempos [" + string.Join(" | ", details) + "]", ok);
+                // 2. The real song beside the dance VMD (BPM reported for the user to confirm).
+                var song = Directory.GetFiles(Path.GetDirectoryName(PocArguments.Value("-pocVmd") ?? ""), "*.wav").FirstOrDefault();
+                var songDetail = "no song";
+                var songOk = true;
+                if (song != null)
+                {
+                    var wav = MmdWavReader.Read(song);
+                    var clock = System.Diagnostics.Stopwatch.StartNew();
+                    var info = MmdBeatAnalyzer.Analyze(wav.Samples, wav.Channels, wav.Frequency);
+                    songOk = info.Bpm >= 60 && info.Bpm <= 200 && info.Beats.Length > 100;
+                    songDetail = Path.GetFileName(song) + ": " + info.Bpm.ToString("0.00") + " BPM, " + info.Beats.Length + " beats, " + info.Bars.Length + " bars, confidence " +
+                        info.Confidence.ToString("0.0") + ", " + clock.Elapsed.TotalSeconds.ToString("0.0") + " s for " + wav.DurationSeconds.ToString("0") + " s";
+                }
+                Check("beat_analysis_on_real_song [" + songDetail + "]", songOk);
+            }
+            catch (Exception ex) { fail(ex.ToString()); yield break; }
+            yield return ui.ApplyPickerResult(music, MmdSceneWorkspace.PickKind.Audio);
+            MmdSceneService.SceneObject target = null;
+            try
+            {
+                target = ui.Scene.Objects.First(o => o.Kind == MmdSceneService.ObjectKind.Character);
+                Activate(ui.Root, "explorer-camera");
+                var dropdown = ui.Root.Q<DropdownField>("AutoCameraTarget"); dropdown.value = dropdown.choices[1];
+                ui.Root.Q<DropdownField>("AutoCameraCut").value = "2마디 (보통)";
+                ui.Root.Q<IntegerField>("AutoCameraSeed").value = 7;
+                ui.Root.Q<Slider>("AutoCameraShake").value = .3f;
+                Activate(ui.Root, "AutoCameraGenerate");
+            }
+            catch (Exception ex) { fail(ex.ToString()); yield break; }
+            yield return null;
+            while (ui.Busy) yield return null;
+            byte[] first = null; string file = null;
+            try
+            {
+                file = ui.Scene.CameraMotion?.Source;
+                var result = ui.LastAutoResult;
+                if (ui.Error.Length > 0 || result == null) throw new InvalidOperationException("auto camera failed: " + ui.Error);
+                var beatFrames = truth128.Select(t => (long)Math.Round(t * 30)).ToArray();
+                var onBeat = result.CutFrames.Count(f => beatFrames.Any(b => Math.Abs(b - f) <= 1)) / (double)Math.Max(1, result.CutFrames.Count);
+                Check("auto_camera_cuts_on_beats [" + result.CutFrames.Count + " cuts, " + (onBeat * 100).ToString("0") + "% within one frame of a beat, BPM " + ui.LastBeats.Bpm.ToString("0.00") +
+                    ", shots " + string.Join("", result.Shots.Select(s => s.shot.ToString()[0])) + "]", result.CutFrames.Count >= 4 && onBeat >= .95 && ui.CameraFollowing &&
+                    file != null && file.EndsWith(".autocam-7.vmd") && ui.UndoLabel == "카메라 VMD 연결" && ui.LastAutoCamera.target == target.Id);
+                first = File.ReadAllBytes(file);
+                Activate(ui.Root, "AutoCameraGenerate");
+            }
+            catch (Exception ex) { fail(ex.ToString()); yield break; }
+            yield return null;
+            while (ui.Busy) yield return null;
+            byte[] again = null;
+            try
+            {
+                again = File.ReadAllBytes(file);
+                ui.Root.Q<IntegerField>("AutoCameraSeed").value = 8;
+                Activate(ui.Root, "AutoCameraGenerate");
+            }
+            catch (Exception ex) { fail(ex.ToString()); yield break; }
+            yield return null;
+            while (ui.Busy) yield return null;
+            try
+            {
+                var other = File.ReadAllBytes(ui.Scene.CameraMotion.Source);
+                var umtReads = false;
+                try { using (new DisposableCamera(MmdPocCamera.Load(ui.Scene.CameraMotion.Source))) umtReads = true; } catch (Exception) { umtReads = false; }
+                Check("auto_camera_same_seed_same_vmd_and_standard_format [" + first.Length + " bytes]", first.SequenceEqual(again) && !first.SequenceEqual(other) &&
+                    ui.Scene.CameraMotion.Source.EndsWith(".autocam-8.vmd") && umtReads);
+                // The character's head stays in a 16:9 frame through the whole song.
+                var motion = ui.Scene.CameraMotion; var inside = 0; var samples = 0; var seconds = ui.Scene.Seconds;
+                for (var t = 0.0; t < Math.Min(ui.Scene.Duration, ui.LastBeats.DurationSeconds) - .1; t += .25)
+                {
+                    ui.Scene.Seek(t);
+                    var points = target.Model.bones.Where(x => x != null).Select(x => x.position).ToArray();
+                    var min = points.Aggregate(Vector3.Min); var max = points.Aggregate(Vector3.Max);
+                    var head = new Vector3((min.x + max.x) * .5f, max.y - (max.y - min.y) * .06f, (min.z + max.z) * .5f);
+                    var pose = motion.Evaluate(t);
+                    var local = Quaternion.Inverse(pose.Rotation) * (head - pose.Position);
+                    var tanV = Mathf.Tan(pose.FieldOfView * .5f * Mathf.Deg2Rad); var tanH = tanV * 16 / 9f;
+                    if (local.z > 0 && Math.Abs(local.x / (local.z * tanH)) <= 1 && Math.Abs(local.y / (local.z * tanV)) <= 1) inside++;
+                    samples++;
+                }
+                ui.Scene.Seek(seconds);
+                Check("auto_camera_keeps_the_character_in_frame [head inside " + inside + "/" + samples + "]", samples > 40 && inside >= samples * .98);
+                if (!ui.SaveTo(Path.Combine(dir, "autocam.mmdscene"))) throw new InvalidOperationException("auto camera scene save failed: " + ui.Error);
+            }
+            catch (Exception ex) { fail(ex.ToString()); yield break; }
+            yield return ui.OpenFrom(Path.Combine(dir, "autocam.mmdscene"));
+            try
+            {
+                var stored = MmdSceneDocument.Read(Path.Combine(dir, "autocam.mmdscene")).cameraMotion;
+                Check("auto_camera_inputs_and_seed_saved_and_restored [stored " + stored.generator.version + "/" + stored.generator.seed + "/" + stored.generator.bpm + "]",
+                    stored.generator.version == AutoCameraSettings.Version && stored.generator.seed == 8 && stored.generator.cutBars == 2 &&
+                    Math.Abs(stored.generator.bpm - 128) < .5 && stored.generator.audio == "dance-128.wav" && stored.path.EndsWith("scene.autocam-8.vmd") &&
+                    ui.LastAutoCamera != null && ui.LastAutoCamera.seed == 8 && ui.Root.Q<IntegerField>("AutoCameraSeed").value == 8 && ui.Scene.CameraMotion != null);
+            }
+            catch (Exception ex) { fail(ex.ToString()); }
+        }
         // ----- H2a-05 look presets -----
         private static void SaveRendered(Camera camera, string file)
         {

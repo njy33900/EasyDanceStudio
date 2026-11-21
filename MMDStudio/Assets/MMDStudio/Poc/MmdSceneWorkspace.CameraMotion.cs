@@ -144,6 +144,7 @@ namespace MmdStudio.Poc
             path = Scene.CameraMotion != null ? MmdSceneDocument.ToStored(sceneFile, Scene.CameraMotion.Source)
                 : unresolvedCamera != null ? Rebase(unresolvedCamera.Stored, unresolvedCamera.BaseScene, sceneFile) : "",
             follow = Scene.CameraMotion != null ? CameraFollowing : unresolvedCamera != null,
+            generator = CaptureAutoCamera(sceneFile),
         };
         private void RebaseUnresolvedCamera(string targetScene)
         {

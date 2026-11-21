@@ -26,6 +26,7 @@ namespace MmdStudio.Poc
             TextButton(viewRow, "ResetView", "뷰 초기화", () => Guard(ResetView), "eds-button--block");
             savedViewList = new VisualElement { name = "SavedViews" }; savedViewList.style.marginTop = 6; cameraSection.Add(savedViewList);
             BuildCameraMotionControls(cameraSection);
+            BuildAutoCameraControls(cameraSection);
 
             lightSection = Section(content, "LightSection", "조명 · 방향광");
             GraphicsSlider(lightSection, "LightR", "색 R", 0, 1, s => s.lightColor.r, (s, v) => s.lightColor.r = v);
