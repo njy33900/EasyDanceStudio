@@ -139,7 +139,7 @@ namespace MmdStudio.Poc
                 // (atomic replace) and the scene stays unsaved.
                 throw new InvalidOperationException("저장하지 못했습니다(읽기 전용·권한·디스크 문제일 수 있습니다): " + Path.GetFileName(full) + " · 원래 파일은 그대로입니다. 다른 이름으로 저장해 보세요.", ex);
             }
-            RebaseUnresolved(full);
+            RebaseUnresolved(full); RebaseUnresolvedAudio(full);
             ProjectPath = full; MarkSaved(); Error = ""; RememberRecent(full);
             message = "저장했습니다: " + Path.GetFileName(full);
             Refresh();
@@ -155,6 +155,7 @@ namespace MmdStudio.Poc
                 graphics = Graphics.Settings,
                 view = new ViewData { pivot = View.Pivot, yaw = View.Yaw, pitch = View.Pitch, distance = View.Distance },
                 timeline = new TimelineData { timeSeconds = Scene.Seconds, loop = Scene.Loop, speed = Scene.Speed },
+                audio = CaptureAudio(sceneFile),
             };
             SceneObjectData Live(MmdSceneService.SceneObject item)
             {
@@ -201,6 +202,7 @@ namespace MmdStudio.Poc
         {
             if (Busy) return;
             Scene.Clear(); Scene.Loop = false; Scene.Speed = 1; ClearDocumentState();
+            ClearHistory(); ResetAudio(null, null, 1, false);
             Graphics.Apply(new SceneGraphicsSettings());
             View.Reset(); View.Apply(Camera.main);
             ClearHistory();
@@ -283,12 +285,26 @@ namespace MmdStudio.Poc
                 }
                 if (token.IsCancellationRequested) cancelled = true;
             }
+            // H2a-03: the scene's audio, prepared like the objects (missing -> unresolved).
+            var audio = new PreparedAudio();
+            if (!cancelled && failure == null)
+            {
+                message = "장면 불러오는 중 · 오디오…"; UpdateStatus(); RefreshLoadingCard();
+                yield return PrepareAudio(file, path, full, token, audio, stage =>
+                {
+                    if (loadCancellation == null || loadCancellation.IsCancellationRequested) return;
+                    message = "장면 불러오는 중 · " + stage; UpdateStatus(); RefreshLoadingCard();
+                });
+                if (token.IsCancellationRequested) cancelled = true;
+                if (audio.Problem != null) problems.Add(audio.Problem);
+            }
             SceneOpenSeconds = (float)clock.Elapsed.TotalSeconds;
             try
             {
                 if (cancelled)
                 {
                     foreach (var item in prepared) Scene.Discard(item);
+                    audio.Track?.Dispose();
                     Error = ""; message = "장면 열기를 취소했습니다. 기존 장면은 유지됩니다.";
                     Scene.ResumeAfterInterruption(playing);
                 }
@@ -298,6 +314,7 @@ namespace MmdStudio.Poc
                     catch
                     {
                         foreach (var item in prepared) Scene.Discard(item);
+                        audio.Track?.Dispose();
                         throw;
                     }
                     ClearDocumentState();
@@ -317,6 +334,8 @@ namespace MmdStudio.Poc
                     }
                     Graphics.Apply(file.graphics);
                     View.Set(file.view.pivot, file.view.yaw, file.view.pitch, file.view.distance); View.Apply(Camera.main);
+                    ClearHistory();
+                    ResetAudio(audio.Track, audio.Missing, file.audio.volume, file.audio.muted);
                     Scene.Loop = file.timeline.loop; Scene.Speed = file.timeline.speed;
                     Scene.Playing = false; Scene.Seek(Math.Min(file.timeline.timeSeconds, Scene.Duration));
                     SelectedId = file.selectedId != null && (Scene.Objects.Any(item => item.Id == file.selectedId) || unresolved.ContainsKey(file.selectedId))

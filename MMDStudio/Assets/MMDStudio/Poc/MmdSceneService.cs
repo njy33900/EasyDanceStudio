@@ -12,7 +12,7 @@ namespace MmdStudio.Poc
     // MVP-01: synchronous scene model, physics OFF by default; PH-03 adds per-character
     // experimental physics through a bake cache. UI/persistence are separate.
     [DefaultExecutionOrder(9000)] // Before pinned UMT's 10000 LateUpdate/SDEF pass.
-    public sealed class MmdSceneService : MonoBehaviour
+    public sealed partial class MmdSceneService : MonoBehaviour
     {
         // Stage: static PMX background. No motion, no clock contribution (MVP-04).
         public enum ObjectKind { Character, Stage }
@@ -70,7 +70,8 @@ namespace MmdStudio.Poc
         private bool skipNextAdvance;
         public IReadOnlyList<SceneObject> Objects => objects.AsReadOnly();
         public double Seconds { get; private set; }
-        public bool Playing { get; set; }
+        private bool playing;
+        public bool Playing { get => playing; set { playing = value; SyncAudio(false); } }
         public bool Loop { get; set; }
         public bool AutomaticClock { get; set; } = true;
         private double speed = 1;
@@ -81,13 +82,14 @@ namespace MmdStudio.Poc
             {
                 if (!Finite(value) || value < .5 || value > 2) throw new ArgumentOutOfRangeException(nameof(value));
                 speed = value;
+                SyncAudio(false);
             }
         }
         public double Duration
         {
             get
             {
-                double duration = 0;
+                double duration = Audio == null ? 0 : Audio.DurationSeconds;
                 foreach (var item in objects) if (item.Motion != null) duration = Math.Max(duration, item.Motion.Summary.durationSeconds);
                 return duration;
             }
@@ -378,7 +380,7 @@ namespace MmdStudio.Poc
             objects.Remove(item);
             if (item.Motion != null) item.Motion.ReleaseSceneClock(this);
             foreach (var renderer in item.Model.root.GetComponentsInChildren<Renderer>(true)) renderer.enabled = false;
-            if (objects.Count == 0) { Playing = false; Seconds = 0; } else Seek(Seconds);
+            if (Duration <= 0) { Playing = false; Seconds = 0; } else Seek(Seconds);
             return index;
         }
 
@@ -431,11 +433,14 @@ namespace MmdStudio.Poc
             item.Bake = null; item.SpringBake = null;
             if (item.Motion != null) item.Motion.ReleaseSceneClock(this);
             item.Owner.Release();
-            if (objects.Count == 0) { Playing = false; Seconds = 0; }
+            if (Duration <= 0) { Playing = false; Seconds = 0; }
             else Seek(Seconds);
         }
 
-        public void Seek(double seconds)
+        public void Seek(double seconds) => SeekCore(seconds, true);
+        // H2a-03: a seek to a different time re-positions the audio; re-showing the current time
+        // (edits, settling) and playback advances do not.
+        private void SeekCore(double seconds, bool reposition)
         {
             if (!Finite(seconds)) throw new ArgumentOutOfRangeException(nameof(seconds));
             var time = Math.Max(0, Math.Min(seconds, Duration));
@@ -443,7 +448,9 @@ namespace MmdStudio.Poc
                 if (item.Motion != null && (!item.Motion.OwnsSceneClock(this) || item.Motion.Playing))
                     throw new InvalidOperationException("A scene motion lost exclusive clock ownership");
             foreach (var item in objects) Show(item, time);
+            var moved = time != Seconds;
             Seconds = time;
+            SyncAudio(reposition && moved);
         }
 
         private void Show(SceneObject item, double time)
@@ -585,9 +592,11 @@ namespace MmdStudio.Poc
             var duration = Duration;
             if (duration <= 0) { Playing = false; return; }
             var time = Seconds + deltaSeconds * Speed;
-            if (Loop) time %= duration;
+            var wrapped = false;
+            if (Loop) { wrapped = time >= duration; time %= duration; }
             else if (time >= duration) { time = duration; Playing = false; }
-            Seek(time);
+            SeekCore(time, false);
+            if (wrapped) SyncAudio(true);
         }
         public void Stop() { Playing = false; Seek(0); }
         public void ResumeAfterInterruption(bool playing) { Playing = playing; skipNextAdvance = true; }
@@ -628,7 +637,7 @@ namespace MmdStudio.Poc
             Playing = false;
             Seconds = 0;
         }
-        private void OnDestroy() { Clear(); }
+        private void OnDestroy() { Clear(); ReleaseAudio(); }
         private void Update()
         {
             if (Time.frameCount <= settleThroughFrame) Seek(Seconds);

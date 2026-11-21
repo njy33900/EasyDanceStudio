@@ -8,6 +8,7 @@ namespace MmdStudio.Poc
         string OpenModel();
         string OpenMotion();
         string OpenScene();
+        string OpenAudio();
         string SaveScene(string suggestedName);
         string SaveText(string suggestedName);
     }
@@ -17,6 +18,7 @@ namespace MmdStudio.Poc
         public string OpenModel() => WindowsRuntimeFilePicker.Open(true);
         public string OpenMotion() => WindowsRuntimeFilePicker.Open(false);
         public string OpenScene() => WindowsRuntimeFilePicker.OpenScene();
+        public string OpenAudio() => WindowsRuntimeFilePicker.OpenAudio();
         public string SaveScene(string suggestedName) => WindowsRuntimeFilePicker.SaveScene(suggestedName);
         public string SaveText(string suggestedName) => WindowsRuntimeFilePicker.SaveText(suggestedName);
     }

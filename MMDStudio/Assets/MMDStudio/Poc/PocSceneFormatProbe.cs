@@ -87,7 +87,9 @@ namespace MmdStudio.Poc
             }
             catch (Exception ex) { Finish(reportPath, report, ex.ToString()); yield break; }
 
-            // 2. Korean, space and special characters in folder and file names.
+            // 2. Korean, space and special characters in folder and file names. Back to the
+            // current scene first: the schema 1 copy above has no audio block.
+            yield return ui.OpenFrom(sceneFile);
             var specialDirectory = Path.Combine(project, "한글 경로 (#1) & '특수' 폴더");
             report.specialFile = Path.Combine(specialDirectory, "장면 테스트 #2.mmdscene");
             try
@@ -99,7 +101,9 @@ namespace MmdStudio.Poc
             yield return ui.OpenFrom(report.specialFile);
             try
             {
+                // H2a-03: the scene carries a WAV; it must survive the special-character path too.
                 Check("korean_space_special_character_path_roundtrip", ui.Error.Length == 0 && ui.UnresolvedCount == 0 &&
+                    ui.Scene.Audio != null && ui.UnresolvedAudioPath == null &&
                     ui.Scene.Objects.Select(o => o.Id).SequenceEqual(ids) &&
                     string.Equals(ui.ProjectPath, Path.GetFullPath(report.specialFile), StringComparison.OrdinalIgnoreCase));
             }
@@ -122,7 +126,9 @@ namespace MmdStudio.Poc
                 try
                 {
                     var stored = MmdSceneDocument.Read(report.otherDriveFile).sceneObjects;
+                    var storedAudio = MmdSceneDocument.Read(report.otherDriveFile).audio.path;
                     Check("other_drive_stores_absolute_paths_and_reopens", ui.Error.Length == 0 && ui.UnresolvedCount == 0 &&
+                        ui.Scene.Audio != null && ui.UnresolvedAudioPath == null && Path.IsPathRooted(storedAudio.Replace('/', Path.DirectorySeparatorChar)) &&
                         ui.Scene.Objects.Select(o => o.Id).SequenceEqual(ids) &&
                         stored.All(o => Path.IsPathRooted(o.assetPath.Replace('/', Path.DirectorySeparatorChar))));
                     Directory.Delete(directory, true);

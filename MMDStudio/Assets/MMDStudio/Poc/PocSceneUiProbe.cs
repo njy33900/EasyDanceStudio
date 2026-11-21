@@ -36,6 +36,7 @@ namespace MmdStudio.Poc
             public string OpenModel() => Answer("OpenModel");
             public string OpenMotion() => Answer("OpenMotion");
             public string OpenScene() => Answer("OpenScene");
+            public string OpenAudio() => Answer("OpenAudio");
             public string SaveScene(string suggestedName) => Answer("SaveScene:" + suggestedName);
             public string SaveText(string suggestedName) => Answer("SaveText");
         }
@@ -982,9 +983,231 @@ namespace MmdStudio.Poc
                 Activate(ui.Root, "UnsavedDiscard");
                 Check("new_scene_discard_resets_everything", asked && ui.Scene.Objects.Count == 0 && ui.ProjectPath == null && !ui.Dirty &&
                     JsonUtility.ToJson(ui.Graphics.Settings) == JsonUtility.ToJson(new SceneGraphicsSettings()) && ui.Root.Q<Label>("ProjectTitle").text == "새 장면");
-                Finish(path, report, null);
             }
-            catch (Exception ex) { Finish(path, report, ex.ToString()); }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            string audioError = null;
+            yield return AudioChecks(ui, path, sceneFile, error => audioError = error);
+            Finish(path, report, audioError);
+        }
+
+        // ----- H2a-03 audio -----
+        // Synthetic WAVs only (written next to the report, outside the repository). The song is
+        // quiet (amplitude 0.1) and plays for about two seconds in total.
+        private static float[] Tone(int rate, double seconds)
+        {
+            var frames = (int)Math.Round(rate * seconds);
+            var samples = new float[frames * 2];
+            for (var i = 0; i < frames; i++)
+            {
+                samples[2 * i] = .1f * Mathf.Sin(2 * Mathf.PI * 440 * i / rate);
+                samples[2 * i + 1] = .1f * Mathf.Sin(2 * Mathf.PI * 660 * i / rate);
+            }
+            return samples;
+        }
+        private IEnumerator AudioChecks(MmdSceneWorkspace ui, string path, string sceneFile, Action<string> fail)
+        {
+            var dir = Path.Combine(Path.GetDirectoryName(path), "audio");
+            var song = Path.Combine(dir, "song.wav");
+            const int rate = 44100; const double length = 3.0;
+            var dialogs = new ScriptedDialogs(); var native = ui.FileDialogs;
+            MmdAudioTrack track = null; AudioSource source = null;
+            try
+            {
+                if (Directory.Exists(dir)) Directory.Delete(dir, true);
+                Directory.CreateDirectory(dir);
+                var pattern = new[] { -1f, -.5f, 0, .25f, .5f, .99f };
+                bool Roundtrip(string name, int channels, int frequency, int bits, bool extensible, float tolerance)
+                {
+                    var file = Path.Combine(dir, name);
+                    var samples = Enumerable.Range(0, 600 * channels).Select(i => pattern[i % pattern.Length]).ToArray();
+                    MmdWavReader.Write(file, samples, channels, frequency, bits, extensible);
+                    var data = MmdWavReader.Read(file);
+                    return data.Channels == channels && data.Frequency == frequency && data.Frames == 600 && data.BitsPerSample == bits &&
+                        data.Samples.Select((value, i) => Math.Abs(value - samples[i])).Max() <= tolerance;
+                }
+                var formats = new[]
+                {
+                    Roundtrip("pcm16.wav", 2, 44100, 16, false, 1e-4f), Roundtrip("pcm24.wav", 1, 48000, 24, false, 1e-6f),
+                    Roundtrip("pcm8.wav", 1, 22050, 8, false, .01f), Roundtrip("float.wav", 2, 48000, 32, true, 0),
+                    Roundtrip("ext16.wav", 2, 96000, 16, true, 1e-4f),
+                };
+                File.WriteAllText(Path.Combine(dir, "text.wav"), "not a wav file at all");
+                var adpcm = Path.Combine(dir, "adpcm.wav");
+                MmdWavReader.Write(adpcm, new float[100], 1, 22050);
+                var bytes = File.ReadAllBytes(adpcm); bytes[20] = 2; File.WriteAllBytes(adpcm, bytes); // format code 2 = MS ADPCM
+                var pcm16 = File.ReadAllBytes(Path.Combine(dir, "pcm16.wav"));
+                File.WriteAllBytes(Path.Combine(dir, "truncated.wav"), pcm16.Take(30).ToArray());
+                string Rejects(string name) { try { MmdWavReader.Read(Path.Combine(dir, name)); return null; } catch (InvalidDataException ex) { return ex.Message; } }
+                var messages = new[] { "text.wav", "adpcm.wav", "truncated.wav" }.Select(Rejects).ToArray();
+                // A data chunk shorter than its header says (streamed writer, cut copy) decodes what is there.
+                File.WriteAllBytes(Path.Combine(dir, "cut.wav"), pcm16.Take(44 + 400).ToArray());
+                var cutFrames = MmdWavReader.Read(Path.Combine(dir, "cut.wav")).Frames;
+                Check("audio_wav_decoder_formats_and_rejections" + (formats.All(x => x) && messages.All(m => m != null) ? "" :
+                    " [formats=" + string.Join(",", formats) + " messages=" + string.Join(" | ", messages) + "]"),
+                    formats.All(x => x) && messages.All(m => m != null) && messages[1].Contains("압축") && cutFrames == 100);
+
+                MmdWavReader.Write(song, Tone(rate, length), 2, rate);
+                ui.FileDialogs = dialogs;
+                Activate(ui.Root, "explorer-audio");
+                if (ui.Target != MmdSceneWorkspace.InspectorTarget.Audio || ui.Root.Q("AudioSection").style.display.value != DisplayStyle.Flex)
+                    throw new InvalidOperationException("audio inspector not shown");
+                dialogs.Next = song; Activate(ui.Root, "AudioConnect");
+            }
+            catch (Exception ex) { ui.FileDialogs = native; fail(ex.ToString()); yield break; }
+            yield return null;
+            while (ui.Busy) yield return null;
+            try
+            {
+                track = ui.Scene.Audio; source = ui.Scene.AudioSourceForTest;
+                Check("audio_connected_from_inspector_sets_scene_length", dialogs.Asked == "OpenAudio" && ui.Error.Length == 0 && track != null &&
+                    track.Frames == (long)(rate * length) && track.Frequency == rate && track.Channels == 2 && Math.Abs(ui.Scene.Duration - length) < 1e-9 &&
+                    ui.Root.Q<Button>("PlayPause").enabledSelf && ui.Root.Q<Button>("explorer-audio").text.Contains("song") &&
+                    ui.Root.Q<Label>("AudioInfo").text.Contains("44100 Hz") && ui.Dirty && ui.UndoLabel == "오디오 연결");
+                ui.Scene.Seek(1.2345);
+                var expected = (long)Math.Round(1.2345 * rate);
+                Check("audio_seek_sets_sample_position", source != null && source.clip == track.Clip && source.timeSamples == expected &&
+                    ui.Scene.AudioTargetSample == expected && !source.isPlaying);
+                ui.Scene.Seek(.5); ui.Scene.AutomaticClock = true; ui.Scene.Playing = true;
+            }
+            catch (Exception ex) { ui.FileDialogs = native; fail(ex.ToString()); yield break; }
+            var drifts = new List<double>(); var output = new float[1024]; var peak = 0f;
+            var resyncsBefore = ui.Scene.AudioResyncs; var started = Time.realtimeSinceStartup;
+            while (Time.realtimeSinceStartup - started < 1.2f)
+            {
+                yield return null;
+                if (!source.isPlaying) continue;
+                drifts.Add((source.timeSamples - ui.Scene.AudioTargetSample) / (double)rate);
+                AudioListener.GetOutputData(output, 0);
+                peak = Math.Max(peak, output.Max(Math.Abs));
+            }
+            ui.Scene.Playing = false; ui.Scene.AutomaticClock = false;
+            try
+            {
+                var maxDrift = drifts.Count == 0 ? 1 : drifts.Max(Math.Abs);
+                var resyncs = ui.Scene.AudioResyncs - resyncsBefore;
+                // Steady state: after the first 10 frames (start latency settles); signed mean = constant offset.
+                var steady = drifts.Skip(10).ToList();
+                var steadyMax = steady.Count == 0 ? 1 : steady.Max(Math.Abs); var mean = steady.Count == 0 ? 0 : steady.Average();
+                Check("audio_plays_in_sync_with_scene_clock [frames " + drifts.Count + ", max drift " + (maxDrift * 1000).ToString("0.0") + " ms, steady max " +
+                    (steadyMax * 1000).ToString("0.0") + " ms, mean " + (mean * 1000).ToString("+0.0;-0.0") + " ms, resyncs " + resyncs +
+                    ", peak " + peak.ToString("0.000") + "]", drifts.Count > 20 && maxDrift < MmdSceneService.ResyncSeconds && resyncs <= 1 && peak > .02f &&
+                    ui.Scene.Seconds > 1.4 && !source.isPlaying);
+                ui.Root.Q<Slider>("Speed").value = 1.5f;
+                var shifted = Math.Abs(source.pitch - 1.5f) < 1e-6f && ui.AudioPitchNoticeVisible;
+                ui.Root.Q<Slider>("Speed").value = 1;
+                Check("speed_change_shifts_audio_pitch_and_is_shown", shifted && Math.Abs(source.pitch - 1) < 1e-6f && !ui.AudioPitchNoticeVisible);
+                ui.Root.Q<Toggle>("Loop").value = true;
+                ui.Scene.Seek(length - .3); ui.Scene.AutomaticClock = true; ui.Scene.Playing = true;
+            }
+            catch (Exception ex) { ui.Scene.AutomaticClock = false; ui.FileDialogs = native; fail(ex.ToString()); yield break; }
+            started = Time.realtimeSinceStartup;
+            var wrapped = false;
+            while (Time.realtimeSinceStartup - started < 2 && !wrapped)
+            {
+                yield return null;
+                wrapped = ui.Scene.Seconds > .05 && ui.Scene.Seconds < 1;
+            }
+            yield return null; yield return null;
+            var wrapOk = wrapped && ui.Scene.Playing && source.isPlaying && ui.Scene.Seconds < 1 &&
+                Math.Abs(source.timeSamples - ui.Scene.AudioTargetSample) < MmdSceneService.ResyncSeconds * rate;
+            ui.Root.Q<Toggle>("Loop").value = false;
+            ui.Scene.Seek(length - .2);
+            started = Time.realtimeSinceStartup;
+            while (Time.realtimeSinceStartup - started < 1.5f && ui.Scene.Playing) yield return null;
+            yield return null;
+            ui.Scene.AutomaticClock = false;
+            try
+            {
+                var stopped = !ui.Scene.Playing && !source.isPlaying && Math.Abs(ui.Scene.Seconds - length) < 1e-9;
+                Check("loop_restarts_audio_and_end_stops_it" + (wrapOk && stopped ? "" : " [wrapped=" + wrapOk + " stopped=" + stopped + "]"), wrapOk && stopped);
+                ui.Root.Q<Slider>("AudioVolume").value = 40;
+                ui.Root.Q<Toggle>("AudioMute").value = true;
+                var applied = Math.Abs(source.volume - .4f) < 1e-6f && source.mute && ui.Scene.AudioVolume == .4f;
+                ui.Undo(); var unmuted = !source.mute && ui.Scene.AudioVolume == .4f;
+                ui.Undo(); var full = ui.Scene.AudioVolume == 1 && Math.Abs(source.volume - 1) < 1e-6f;
+                ui.Redo(); ui.Redo();
+                Activate(ui.Root, "AudioRemove");
+                var removed = ui.Scene.Audio == null && ui.Scene.Duration == 0 && !source.isPlaying && !ui.Root.Q<Button>("PlayPause").enabledSelf &&
+                    ui.Root.Q<Button>("explorer-audio").text.Contains("없음");
+                ui.Undo(); var back = ui.Scene.Audio == track && !track.Disposed && Math.Abs(ui.Scene.Duration - length) < 1e-9;
+                ui.Redo(); var again = ui.Scene.Audio == null;
+                ui.Undo();
+                Check("audio_volume_mute_and_remove_are_undoable" + (applied && unmuted && full && removed && back && again ? "" :
+                    " [applied=" + applied + " unmuted=" + unmuted + " full=" + full + " removed=" + removed + " back=" + back + " again=" + again + "]"),
+                    applied && unmuted && full && removed && back && again && ui.Scene.Audio == track && ui.Scene.AudioVolume == .4f && ui.Scene.AudioMuted);
+                if (!ui.SaveTo(Path.Combine(dir, "audio.mmdscene"))) throw new InvalidOperationException("audio scene save failed: " + ui.Error);
+            }
+            catch (Exception ex) { ui.FileDialogs = native; fail(ex.ToString()); yield break; }
+            var audioScene = Path.Combine(dir, "audio.mmdscene");
+            yield return ui.OpenFrom(audioScene);
+            var missingScene = Path.Combine(dir, "missing-audio.mmdscene");
+            try
+            {
+                var stored = MmdSceneDocument.Read(audioScene).audio;
+                var reopened = ui.Scene.Audio;
+                Check("audio_saved_relative_and_reopened", stored.path == "song.wav" && stored.volume == .4f && stored.muted && reopened != null && reopened != track &&
+                    track.Disposed && reopened.Frames == track.Frames && ui.Scene.AudioVolume == .4f && ui.Scene.AudioMuted && !ui.Dirty &&
+                    ui.Error.Length == 0 && ui.LastLoadProblems.Length == 0);
+                var file = MmdSceneDocument.Read(audioScene);
+                file.audio.path = "gone/missing.wav";
+                MmdSceneDocument.Write(missingScene, file);
+            }
+            catch (Exception ex) { ui.FileDialogs = native; fail(ex.ToString()); yield break; }
+            yield return ui.OpenFrom(missingScene);
+            try
+            {
+                var listed = ui.DialogVisible && ui.LastLoadProblems.Any(p => p.Contains("missing.wav")) && ui.Scene.Audio == null &&
+                    ui.UnresolvedAudioPath == "gone/missing.wav" && ui.Root.Q<Button>("explorer-audio").text.Contains("누락");
+                Activate(ui.Root, "NoticeOk");
+                var sub = Path.Combine(dir, "sub"); Directory.CreateDirectory(sub);
+                if (!ui.SaveTo(Path.Combine(sub, "moved.mmdscene"))) throw new InvalidOperationException("moved save failed: " + ui.Error);
+                var kept = MmdSceneDocument.Read(Path.Combine(sub, "moved.mmdscene")).audio.path == "../gone/missing.wav";
+                if (!listed || !kept) throw new InvalidOperationException("missing_audio_kept_as_reference [listed=" + listed + " kept=" + kept + " problems=" + string.Join(" | ", ui.LastLoadProblems) + "]");
+                Activate(ui.Root, "explorer-audio");
+                dialogs.Next = song; Activate(ui.Root, "AudioConnect");
+            }
+            catch (Exception ex) { ui.FileDialogs = native; fail(ex.ToString()); yield break; }
+            yield return null;
+            while (ui.Busy) yield return null;
+            try
+            {
+                var replaced = ui.Scene.Audio != null && ui.UnresolvedAudioPath == null;
+                ui.Undo(); var restoredMissing = ui.Scene.Audio == null && ui.UnresolvedAudioPath == "../gone/missing.wav";
+                ui.Redo();
+                Check("missing_audio_kept_as_reference_and_replaceable", replaced && restoredMissing && ui.Scene.Audio != null);
+                dialogs.Next = Path.Combine(dir, "adpcm.wav"); Activate(ui.Root, "AudioConnect");
+            }
+            catch (Exception ex) { ui.FileDialogs = native; fail(ex.ToString()); yield break; }
+            var current = ui.Scene.Audio;
+            yield return null;
+            while (ui.Busy) yield return null;
+            try
+            {
+                Check("unsupported_wav_rejected_and_current_audio_kept", ui.Error.Contains("압축") && ui.Scene.Audio == current && !current.Disposed);
+                if (!ui.SaveTo(Path.Combine(dir, "sub", "moved.mmdscene"))) throw new InvalidOperationException("save before reopen failed: " + ui.Error);
+            }
+            catch (Exception ex) { ui.FileDialogs = native; fail(ex.ToString()); yield break; }
+            // The main scene gets the song for the relaunch check (PocSceneRestoreProbe).
+            yield return ui.OpenFrom(sceneFile);
+            var motionDuration = ui.Scene.Duration;
+            try
+            {
+                Activate(ui.Root, "explorer-audio");
+                dialogs.Next = song; Activate(ui.Root, "AudioConnect");
+            }
+            catch (Exception ex) { ui.FileDialogs = native; fail(ex.ToString()); yield break; }
+            yield return null;
+            while (ui.Busy) yield return null;
+            try
+            {
+                ui.FileDialogs = native;
+                ui.Root.Q<Slider>("AudioVolume").value = 80;
+                if (!ui.SaveTo(sceneFile)) throw new InvalidOperationException("scene save with audio failed: " + ui.Error);
+                var saved = MmdSceneDocument.Read(sceneFile);
+                Check("scene_with_audio_saved_for_relaunch", saved.audio.path == "../audio/song.wav" && saved.audio.volume == .8f && !saved.audio.muted &&
+                    saved.sceneObjects.Count == 3 && Math.Abs(ui.Scene.Duration - Math.Max(motionDuration, length)) < 1e-9);
+            }
+            catch (Exception ex) { fail(ex.ToString()); }
         }
         private static bool Near(Vector3 x, Vector3 y, float tolerance = 1e-3f) => (x - y).magnitude <= tolerance;
         private static bool Near(float x, float y, float tolerance = 1e-3f) => Math.Abs(x - y) <= tolerance;

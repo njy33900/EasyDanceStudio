@@ -51,7 +51,7 @@ else{$arguments+=@('-pocStagePmx',(Join-Path $stageFixtures 'stage.pmx'),'-scree
 $code=Invoke-Hidden $exe $arguments 300
 $report=Get-Content -LiteralPath $path -Raw|ConvertFrom-Json
 if((Get-Item -LiteralPath $path).LastWriteTimeUtc -lt $started -or $code -ne 0 -or -not $report.success -or
-    $report.backend -ne $Backend -or $report.checks.Count -lt $(if($Ui){144}else{26})){throw "Scene verification failed: $($report.error)"}
+    $report.backend -ne $Backend -or $report.checks.Count -lt $(if($Ui){155}else{26})){throw "Scene verification failed: $($report.error)"}
 if($Ui){
     $report|Select-Object success,backend,@{Name='checks';Expression={$_.checks.Count}},screenshot|Format-List
     # Restart check: a fresh Player process opens the .mmdscene saved by the UI run.
@@ -61,7 +61,7 @@ if($Ui){
         '-logFile',(Join-Path $artifacts 'scene-restore.log'),'-screen-fullscreen','0','-screen-width','1280','-screen-height','720') 300
     $restore=Get-Content -LiteralPath $restorePath -Raw|ConvertFrom-Json
     if((Get-Item -LiteralPath $restorePath).LastWriteTimeUtc -lt $restoreStarted -or $code -ne 0 -or -not $restore.success -or
-        $restore.backend -ne $Backend -or $restore.checks.Count -lt 9){throw "Scene restore verification failed: $($restore.error)"}
+        $restore.backend -ne $Backend -or $restore.checks.Count -lt 10){throw "Scene restore verification failed: $($restore.error)"}
     $restore|Select-Object success,backend,@{Name='checks';Expression={$_.checks.Count}},objects,screenshot|Format-List
 }
 else{$report|Select-Object success,backend,@{Name='checks';Expression={$_.checks.Count}},maximumReplayError,realtimeSeconds,screenshot|Format-List}

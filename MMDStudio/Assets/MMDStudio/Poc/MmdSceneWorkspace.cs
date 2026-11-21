@@ -15,9 +15,9 @@ namespace MmdStudio.Poc
         public bool Busy { get; private set; }
         internal VisualElement Root { get; private set; }
         private ScrollView list;
-        public enum PickKind { Character, Stage, Motion }
+        public enum PickKind { Character, Stage, Motion, Audio }
         // What the inspector shows: a scene object (SelectedId), the light, or the camera.
-        public enum InspectorTarget { Object, Light, Camera }
+        public enum InspectorTarget { Object, Light, Camera, Audio }
         public InspectorTarget Target { get; private set; }
         private Label info, status, time, selectionTitle, speedValue, motionInfo, materialInfo;
         private Button add, addStage, connect, remove, play, stop, skipStart;
@@ -176,6 +176,7 @@ namespace MmdStudio.Poc
             materialInfo = Text(materialSection, "", "eds-section-text"); materialInfo.name = "MaterialInfo";
             Text(materialSection, "재질 편집(툰·PBR)은 2차 예정입니다.", "eds-note");
 
+            BuildAudioSection(content);
             BuildGraphicsSections(content);
 
             // ----- Playback bar -----
@@ -193,6 +194,7 @@ namespace MmdStudio.Poc
             speed = new Slider("속도", .5f, 2) { name = "Speed" }; speed.AddToClassList("eds-speed"); speed.SetValueWithoutNotify(1); options.Add(speed);
             speed.RegisterValueChangedCallback(evt => Guard(() => Record("재생 속도", null, () => Scene.Speed = evt.newValue, coalesce: true)));
             speedValue = Text(options, "1.0×", "eds-speed-value");
+            BuildAudioPitchChip(options);
             HideButton(playback, "HidePlaybackBar", "PlaybackBar");
 
             // ----- Status bar -----
@@ -293,12 +295,14 @@ namespace MmdStudio.Poc
             Text(list, "환경", "eds-tree-group");
             ExplorerRow(list, "explorer-light", "조명", MmdIconKind.Light, () => SelectTarget(InspectorTarget.Light), Target == InspectorTarget.Light);
             ExplorerRow(list, "explorer-camera", "카메라", MmdIconKind.Camera, () => SelectTarget(InspectorTarget.Camera), Target == InspectorTarget.Camera);
+            var audioRow = ExplorerRow(list, "explorer-audio", AudioExplorerLabel, MmdIconKind.Audio, () => SelectTarget(InspectorTarget.Audio), Target == InspectorTarget.Audio);
+            if (UnresolvedAudioPath != null && Scene.Audio == null) audioRow.AddToClassList("eds-row--missing");
 
             var selected = Selected;
             var isCharacter = selected != null && selected.Kind == MmdSceneService.ObjectKind.Character;
             add.SetEnabled(!Busy); addStage.SetEnabled(!Busy); connect.SetEnabled(!Busy && isCharacter); remove.SetEnabled(!Busy && selected != null);
             var selectedMissing = Target == InspectorTarget.Object ? SelectedUnresolved : null;
-            selectionTitle.text = Target == InspectorTarget.Light ? "조명" : Target == InspectorTarget.Camera ? "카메라" :
+            selectionTitle.text = Target == InspectorTarget.Light ? "조명" : Target == InspectorTarget.Camera ? "카메라" : Target == InspectorTarget.Audio ? "오디오" :
                 selectedMissing != null ? (selectedMissing.Data.type == SceneObjectData.StageType ? "누락된 배경" : "누락된 캐릭터") :
                 selected == null ? "선택한 항목" : isCharacter ? "선택한 캐릭터" : "선택한 배경";
             Show(missingSection, selectedMissing != null);
@@ -327,6 +331,7 @@ namespace MmdStudio.Poc
             else
             {
                 info.text = Target == InspectorTarget.Light ? "방향광의 색·강도·방향과 그림자" : Target == InspectorTarget.Camera ? "시야각과 저장된 시점" :
+                    Target == InspectorTarget.Audio ? "장면 음악(WAV)과 음량" :
                     selectedMissing != null ? Path.GetFileName(selectedMissing.Data.assetPath) :
                     Scene.Objects.Count == 0 ? "장면이 비어 있습니다." : "탐색기나 뷰포트에서 항목을 선택하세요.";
                 position.SetValueWithoutNotify(Vector3.zero); rotation.SetValueWithoutNotify(Vector3.zero); scale.SetValueWithoutNotify(Vector3.one);
@@ -340,6 +345,7 @@ namespace MmdStudio.Poc
             UpdateClock();
             UpdateHighlight();
             RefreshGraphics();
+            RefreshAudio();
             RefreshGizmo();
         }
         private Button ExplorerRow(VisualElement parent, string name, string text, MmdIconKind icon, Action action, bool selected)
@@ -372,6 +378,7 @@ namespace MmdStudio.Poc
             timeline.SetValueWithoutNotify(Scene.Duration > 0 ? (float)(Scene.Seconds / Scene.Duration) : 0);
             time.text = Clock(Scene.Seconds) + " / " + Clock(Scene.Duration);
             speedValue.text = Scene.Speed.ToString("0.0") + "×";
+            UpdateAudioPitchChip();
         }
         private void Update()
         {

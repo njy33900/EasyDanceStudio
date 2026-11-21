@@ -27,6 +27,8 @@ namespace MmdStudio.Poc
             public string graphics;
             public bool loop;
             public double speed;
+            public float audioVolume;
+            public bool audioMuted;
             public Dictionary<string, ObjectState> objects = new Dictionary<string, ObjectState>();
         }
 
@@ -107,7 +109,7 @@ namespace MmdStudio.Poc
         // ----- snapshots -----
         private LightState CaptureLight()
         {
-            var state = new LightState { graphics = JsonUtility.ToJson(Graphics.Settings), loop = Scene.Loop, speed = Scene.Speed };
+            var state = new LightState { graphics = JsonUtility.ToJson(Graphics.Settings), loop = Scene.Loop, speed = Scene.Speed, audioVolume = Scene.AudioVolume, audioMuted = Scene.AudioMuted };
             foreach (var item in Scene.Objects)
                 state.objects[item.Id] = new ObjectState
                 {
@@ -123,7 +125,7 @@ namespace MmdStudio.Poc
             a.physics == b.physics && a.spring == b.spring && a.strength.SequenceEqual(b.strength);
 
         private static bool Same(LightState a, LightState b) =>
-            a.graphics == b.graphics && a.loop == b.loop && a.speed == b.speed && a.objects.Count == b.objects.Count &&
+            a.graphics == b.graphics && a.loop == b.loop && a.speed == b.speed && a.audioVolume == b.audioVolume && a.audioMuted == b.audioMuted && a.objects.Count == b.objects.Count &&
             a.objects.All(entry => b.objects.TryGetValue(entry.Key, out var other) && Same(entry.Value, other));
 
         // Re-applies a snapshot, touching only what differs (no needless physics re-bakes).
@@ -133,6 +135,8 @@ namespace MmdStudio.Poc
             if (current.graphics != target.graphics) Graphics.Apply(JsonUtility.FromJson<SceneGraphicsSettings>(target.graphics));
             if (current.loop != target.loop) Scene.Loop = target.loop;
             if (current.speed != target.speed) Scene.Speed = target.speed;
+            if (current.audioVolume != target.audioVolume) Scene.AudioVolume = target.audioVolume;
+            if (current.audioMuted != target.audioMuted) Scene.AudioMuted = target.audioMuted;
             foreach (var entry in target.objects)
             {
                 if (!current.objects.TryGetValue(entry.Key, out var now)) continue;

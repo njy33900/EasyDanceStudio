@@ -68,6 +68,8 @@ namespace MmdStudio.Poc
             b.AppendLine("물리 ON " + Scene.Objects.Count(o => o.PhysicsEnabled) + " · 신체 흔들림 " + Scene.Objects.Count(o => o.SpringPreset != null) +
                          " · 길이 " + Scene.Duration.ToString("0.0", CultureInfo.InvariantCulture) + "초 · " + (Dirty ? "저장 안 됨" : "저장됨") +
                          " · 실행 취소 " + UndoCount);
+            b.AppendLine("오디오: " + (Scene.Audio != null ? Path.GetFileName(Scene.Audio.Source) + " · " + Scene.Audio.Format :
+                UnresolvedAudioPath != null ? "누락 (" + Path.GetFileName(UnresolvedAudioPath) + ")" : "없음"));
             b.AppendLine("장면 파일: " + (ProjectPath == null ? "(새 장면)" : Path.GetFileName(ProjectPath)));
             b.AppendLine();
             b.AppendLine("[로그]");

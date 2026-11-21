@@ -18,7 +18,7 @@ namespace MmdStudio.Poc
             if (Busy) return;
             var playing = Scene.Playing; Scene.Playing = false;
             string path;
-            try { path = kind != PickKind.Motion ? FileDialogs.OpenModel() : FileDialogs.OpenMotion(); }
+            try { path = kind == PickKind.Audio ? FileDialogs.OpenAudio() : kind != PickKind.Motion ? FileDialogs.OpenModel() : FileDialogs.OpenMotion(); }
             catch (Exception ex) { Error = ex.Message; Refresh(); return; }
             finally { Scene.ResumeAfterInterruption(playing); }
             if (string.IsNullOrEmpty(path)) { message = "파일 선택을 취소했습니다."; Error = ""; Refresh(); return; }
@@ -35,7 +35,19 @@ namespace MmdStudio.Poc
             yield return null;
             System.Threading.Tasks.Task<MmdSceneService.SceneObject> importTask = null;
             System.Threading.Tasks.Task motionTask = null;
-            if (kind != PickKind.Motion)
+            System.Threading.Tasks.Task<MmdAudioTrack> audioTask = null;
+            if (kind == PickKind.Audio)
+            {
+                loadCancellation = new System.Threading.CancellationTokenSource();
+                RefreshLoadingCard();
+                audioTask = MmdAudioTrack.LoadAsync(path, stage =>
+                {
+                    if (loadCancellation == null || loadCancellation.IsCancellationRequested) return;
+                    message = stage; UpdateStatus(); RefreshLoadingCard();
+                }, loadCancellation.Token);
+                while (!audioTask.IsCompleted) yield return null;
+            }
+            else if (kind != PickKind.Motion)
             {
                 loadCancellation = new System.Threading.CancellationTokenSource();
                 RefreshLoadingCard();
@@ -62,7 +74,13 @@ namespace MmdStudio.Poc
             }
             try
             {
-                if (kind == PickKind.Character)
+                if (kind == PickKind.Audio)
+                {
+                    var track = audioTask.GetAwaiter().GetResult();
+                    if (loadCancellation.IsCancellationRequested) { track.Dispose(); throw new OperationCanceledException(); }
+                    ConnectAudio(track);
+                }
+                else if (kind == PickKind.Character)
                 {
                     var item = importTask.GetAwaiter().GetResult();
                     SelectedId = item.Id; Push(new AddCommand { Label = "캐릭터 추가", ObjectId = item.Id, Item = item, Index = Scene.Objects.ToList().IndexOf(item) });

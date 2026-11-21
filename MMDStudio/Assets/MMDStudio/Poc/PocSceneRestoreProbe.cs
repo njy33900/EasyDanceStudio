@@ -61,6 +61,10 @@ namespace MmdStudio.Poc
                     Math.Abs(ui.View.Pitch - file.view.pitch) < 1e-3f && Math.Abs(ui.View.Distance - file.view.distance) < 1e-3f);
                 Check("timeline_restored_paused", ui.Scene.Loop == file.timeline.loop && Math.Abs(ui.Scene.Speed - file.timeline.speed) < 1e-9 &&
                     Math.Abs(ui.Scene.Seconds - Math.Min(file.timeline.timeSeconds, ui.Scene.Duration)) < 1e-6 && !ui.Scene.Playing);
+                // H2a-03: the UI probe saves the scene with a WAV (volume 80%).
+                Check("audio_restored_with_volume", !string.IsNullOrEmpty(file.audio.path) && ui.Scene.Audio != null && ui.UnresolvedAudioPath == null &&
+                    SamePath(ui.Scene.Audio.Source, MmdSceneDocument.Resolve(sceneFile, file.audio.path)) &&
+                    ui.Scene.AudioVolume == file.audio.volume && ui.Scene.AudioMuted == file.audio.muted);
                 Check("characters_sampled_at_restored_time", ui.Scene.Objects.Where(item => item.Motion != null).All(item => Math.Abs(item.Motion.TimeSeconds - (float)ui.Scene.Seconds) < 1e-4f));
                 report.screenshot = Path.Combine(Path.GetDirectoryName(reportPath), "scene-restore.png");
                 ScreenCapture.CaptureScreenshot(report.screenshot);

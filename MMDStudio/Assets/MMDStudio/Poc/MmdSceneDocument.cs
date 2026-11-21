@@ -12,6 +12,8 @@ namespace MmdStudio.Poc
     // Schema 2 (H1-05, 2026-11-21): per-object physics / body-motion settings in a `physics`
     // block. Schema 1 files are migrated in memory on open (the file is not rewritten until the
     // user saves); newer versions are rejected and the original is left untouched.
+    // H2a-03 (2026-11-21): optional `audio` block (WAV reference, volume, mute). Additive within
+    // schema 2: a file without it opens with no audio.
     [Serializable]
     public sealed class SceneFile
     {
@@ -26,6 +28,15 @@ namespace MmdStudio.Poc
         public ViewData view = new ViewData();
         public SceneGraphicsSettings graphics = new SceneGraphicsSettings();
         public TimelineData timeline = new TimelineData();
+        public AudioData audio = new AudioData();
+    }
+
+    [Serializable]
+    public sealed class AudioData
+    {
+        public string path = "";  // stored like model paths; empty when the scene has no audio
+        public float volume = 1;  // 0..1
+        public bool muted;
     }
 
     [Serializable]
@@ -203,6 +214,10 @@ namespace MmdStudio.Poc
             if (scene.graphics == null) throw new InvalidDataException("그래픽 설정이 없습니다.");
             try { scene.graphics.Validate(); }
             catch (ArgumentException ex) { throw new InvalidDataException("그래픽 설정이 올바르지 않습니다: " + ex.Message, ex); }
+            if (scene.audio == null) scene.audio = new AudioData();
+            if (scene.audio.path == null) scene.audio.path = "";
+            if (scene.audio.path.Length > 0) CheckPath(scene.audio.path, ".wav");
+            if (!Finite(scene.audio.volume) || scene.audio.volume < 0 || scene.audio.volume > 1) throw new InvalidDataException("오디오 음량이 올바르지 않습니다.");
         }
         private static void CheckPath(string value, string extension)
         {

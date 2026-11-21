@@ -24,7 +24,7 @@ namespace MmdStudio.Poc
         {
             if (target == InspectorTarget.Object) throw new ArgumentException(nameof(target));
             SelectedId = null; Target = target; Error = "";
-            message = target == InspectorTarget.Light ? "조명 선택" : "카메라 선택";
+            message = target == InspectorTarget.Light ? "조명 선택" : target == InspectorTarget.Audio ? "오디오 선택" : "카메라 선택";
             Refresh();
         }
 
