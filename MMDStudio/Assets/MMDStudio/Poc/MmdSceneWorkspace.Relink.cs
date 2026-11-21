@@ -36,7 +36,7 @@ namespace MmdStudio.Poc
             if (missing == null) return;
             var playing = Scene.Playing; Scene.Playing = false;
             string path;
-            try { path = WindowsRuntimeFilePicker.Open(true); }
+            try { path = FileDialogs.OpenModel(); }
             catch (Exception ex) { Error = ex.Message; Refresh(); return; }
             finally { Scene.ResumeAfterInterruption(playing); }
             if (string.IsNullOrEmpty(path)) { message = "파일 선택을 취소했습니다."; Error = ""; Refresh(); return; }

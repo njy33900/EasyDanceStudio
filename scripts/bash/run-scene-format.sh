@@ -7,7 +7,8 @@ cd /e/workspace/EasyDanceStudio
 CFG=$1; BK=$2
 R='E:\workspace\EasyDanceStudio'
 A="artifacts/scene-format/$BK-$CFG"; mkdir -p "$A"; AW="$R\\${A//\//\\}"
-PROJECT="artifacts/scene-ui/$BK/$CFG/project"
+UI="artifacts/scene-ui/$BK"; [ "$CFG" = release ] && UI="$UI/release"   # same layout as run-scene-ui.sh
+PROJECT="$UI/project"
 SCENE="$R\\${PROJECT//\//\\}\\scene.mmdscene"
 EXEU="./out/$CFG/V0-$BK/MmdStudioPoC.exe"
 START=$(date +%s)

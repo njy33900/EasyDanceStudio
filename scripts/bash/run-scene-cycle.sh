@@ -7,7 +7,8 @@ cd /e/workspace/EasyDanceStudio
 CFG=$1; BK=$2; N=${3:-10}
 R='E:\workspace\EasyDanceStudio'
 A="artifacts/scene-cycle/$BK-$CFG"; mkdir -p "$A"; AW="$R\\${A//\//\\}"
-SCENE="$R\\artifacts\\scene-ui\\$BK\\$CFG\\project\\scene.mmdscene"
+UI="artifacts/scene-ui/$BK"; [ "$CFG" = release ] && UI="$UI/release"   # same layout as run-scene-ui.sh
+SCENE="$R\\${UI//\//\\}\\project\\scene.mmdscene"
 EXEU="./out/$CFG/V0-$BK/MmdStudioPoC.exe"
 START=$(date +%s)
 timeout 900 "$EXEU" -pocSceneCycleReport "$AW\scene-cycle.json" -sceneFile "$SCENE" -pocCycles "$N" \

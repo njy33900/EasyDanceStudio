@@ -28,24 +28,10 @@ namespace MmdStudio.Poc
             const string scenePath = "Assets/MMDStudio/Poc/PocSmoke.unity";
             Directory.CreateDirectory(Path.GetDirectoryName(scenePath));
             Directory.CreateDirectory(Path.GetDirectoryName(output));
-            var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-
-            var camera = new GameObject("Main Camera").AddComponent<Camera>();
-            camera.tag = "MainCamera";
-            camera.transform.position = new Vector3(0, 1, -4);
-            camera.clearFlags = CameraClearFlags.SolidColor;
-            camera.backgroundColor = new Color(0.08f, 0.10f, 0.14f);
-            var light = new GameObject("Directional Light").AddComponent<Light>();
-            light.type = LightType.Directional;
-            light.transform.rotation = Quaternion.Euler(35, -30, 0);
-            light.intensity = 2;
-            var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            cube.transform.position = new Vector3(0, 1, 0);
-            cube.transform.rotation = Quaternion.Euler(15, 30, 0);
-            new GameObject("Player Smoke Probe").AddComponent<PocSmoke>();
-
-            if (!EditorSceneManager.SaveScene(scene, scenePath))
-                throw new IOException("Could not save the PoC scene.");
+            // H1-04: reuse the tracked scene when it already has the expected content, so repeated
+            // builds do not rewrite it with new random fileIDs. Regenerate only when it is missing
+            // or different.
+            if (!ExistingSceneIsCurrent(scenePath)) CreateScene(scenePath);
 
             PlayerSettings.companyName = "MmdStudio";
             PlayerSettings.productName = "MmdStudioPoC";
@@ -94,6 +80,41 @@ namespace MmdStudio.Poc
             File.WriteAllText(Path.Combine(Path.GetDirectoryName(output), "build-info.json"),
                 JsonUtility.ToJson(new BuildInfo { configuration = configuration, backend = backendName, developmentBuild = configuration == "debug" }, true));
             Debug.Log("POC_BUILD_SUCCESS " + configuration + " " + backendName + " " + output);
+        }
+
+        private static bool ExistingSceneIsCurrent(string scenePath)
+        {
+            if (!File.Exists(scenePath)) return false;
+            var scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+            var names = new System.Collections.Generic.HashSet<string>();
+            foreach (var root in scene.GetRootGameObjects()) names.Add(root.name);
+            var current = scene.rootCount == 4 && names.SetEquals(new[] { "Main Camera", "Directional Light", "Cube", "Player Smoke Probe" }) &&
+                Array.Exists(scene.GetRootGameObjects(), root => root.GetComponent<PocSmoke>() != null) &&
+                Array.Exists(scene.GetRootGameObjects(), root => root.GetComponent<Camera>() != null && root.CompareTag("MainCamera"));
+            Debug.Log("POC_BUILD_SCENE " + (current ? "reused" : "regenerated") + " " + scenePath);
+            return current;
+        }
+
+        private static void CreateScene(string scenePath)
+        {
+            var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+
+            var camera = new GameObject("Main Camera").AddComponent<Camera>();
+            camera.tag = "MainCamera";
+            camera.transform.position = new Vector3(0, 1, -4);
+            camera.clearFlags = CameraClearFlags.SolidColor;
+            camera.backgroundColor = new Color(0.08f, 0.10f, 0.14f);
+            var light = new GameObject("Directional Light").AddComponent<Light>();
+            light.type = LightType.Directional;
+            light.transform.rotation = Quaternion.Euler(35, -30, 0);
+            light.intensity = 2;
+            var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            cube.transform.position = new Vector3(0, 1, 0);
+            cube.transform.rotation = Quaternion.Euler(15, 30, 0);
+            new GameObject("Player Smoke Probe").AddComponent<PocSmoke>();
+
+            if (!EditorSceneManager.SaveScene(scene, scenePath))
+                throw new IOException("Could not save the PoC scene.");
         }
 
         private static void CopyThirdPartyNotices(string outputDirectory)

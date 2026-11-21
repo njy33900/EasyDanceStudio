@@ -9,7 +9,8 @@ cd /e/workspace/EasyDanceStudio
 CFG=$1; BK=$2
 R='E:\workspace\EasyDanceStudio'
 A="artifacts/recovery/$BK-$CFG"; rm -rf "$A"; mkdir -p "$A"; AW="$R\\${A//\//\\}"
-PROJECT="artifacts/scene-ui/$BK/$CFG/project"
+UI="artifacts/scene-ui/$BK"; [ "$CFG" = release ] && UI="$UI/release"   # same layout as run-scene-ui.sh
+PROJECT="$UI/project"
 EXEU="./out/$CFG/V0-$BK/MmdStudioPoC.exe"
 SCENE="$R\\${PROJECT//\//\\}\\recovery-test.mmdscene"
 COMMON=(-recoveryDir "$AW\\recovery" -autosaveSeconds 1 -screen-fullscreen 0 -screen-width 1280 -screen-height 720)

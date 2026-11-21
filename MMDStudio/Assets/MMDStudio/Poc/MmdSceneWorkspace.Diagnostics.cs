@@ -101,7 +101,7 @@ namespace MmdStudio.Poc
         private void PickDiagnosticsExport()
         {
             string path;
-            try { path = WindowsRuntimeFilePicker.SaveText("EasyDanceStudio-진단-" + DateTime.Now.ToString("yyyyMMdd-HHmm", CultureInfo.InvariantCulture) + ".txt"); }
+            try { path = FileDialogs.SaveText("EasyDanceStudio-진단-" + DateTime.Now.ToString("yyyyMMdd-HHmm", CultureInfo.InvariantCulture) + ".txt"); }
             catch (Exception ex) { Error = ex.Message; Refresh(); return; }
             if (path == null) { message = "내보내기를 취소했습니다."; Refresh(); return; }
             ExportDiagnostics(path);

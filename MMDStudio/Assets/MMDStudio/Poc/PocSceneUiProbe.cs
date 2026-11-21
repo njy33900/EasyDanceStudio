@@ -28,6 +28,17 @@ namespace MmdStudio.Poc
             public int pmxLoadFrames;
             public string[] pmxStageTimings;
         }
+        // Answers the workspace's file dialogs without a native window; records the last request.
+        private sealed class ScriptedDialogs : IStudioFileDialogs
+        {
+            public string Next, Asked;
+            private string Answer(string request) { Asked = request; var answer = Next; Next = null; return answer; }
+            public string OpenModel() => Answer("OpenModel");
+            public string OpenMotion() => Answer("OpenMotion");
+            public string OpenScene() => Answer("OpenScene");
+            public string SaveScene(string suggestedName) => Answer("SaveScene:" + suggestedName);
+            public string SaveText(string suggestedName) => Answer("SaveText");
+        }
         private readonly List<string> checks = new List<string>();
         private void Check(string name, bool passed)
         { if (!passed) throw new InvalidOperationException(name); checks.Add(name); }
@@ -570,6 +581,37 @@ namespace MmdStudio.Poc
             }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
             yield return new WaitForSecondsRealtime(.2f);
+
+            // H1-04: the toolbar's file buttons through the dialog seam (scripted answers instead of
+            // the native dialog): save as, cancelled open, open.
+            var dialogs = new ScriptedDialogs(); var nativeDialogs = ui.FileDialogs; ui.FileDialogs = dialogs;
+            var saveAsCopy = Path.Combine(project, "save-as-copy.mmdscene");
+            bool savedAs = false, openCancelled = false;
+            try
+            {
+                if (File.Exists(saveAsCopy)) File.Delete(saveAsCopy);
+                dialogs.Next = saveAsCopy; Activate(ui.Root, "SaveSceneAs");
+                savedAs = string.Equals(ui.ProjectPath, Path.GetFullPath(saveAsCopy), StringComparison.OrdinalIgnoreCase) && File.Exists(saveAsCopy) &&
+                    !ui.Dirty && dialogs.Asked == "SaveScene:scene.mmdscene";
+                dialogs.Next = null; Activate(ui.Root, "OpenScene");
+                openCancelled = dialogs.Asked == "OpenScene" && !ui.Busy && ui.Error.Length == 0 &&
+                    string.Equals(ui.ProjectPath, Path.GetFullPath(saveAsCopy), StringComparison.OrdinalIgnoreCase);
+                dialogs.Next = sceneFile; Activate(ui.Root, "OpenScene");
+            }
+            catch (Exception ex) { ui.FileDialogs = nativeDialogs; Finish(path, report, ex.ToString()); yield break; }
+            yield return null;
+            while (ui.Busy) yield return null;
+            try
+            {
+                ui.FileDialogs = nativeDialogs;
+                a = Find(ui, MmdSceneService.ObjectKind.Character, aModel); b = Find(ui, MmdSceneService.ObjectKind.Character, bModel);
+                stage = Find(ui, MmdSceneService.ObjectKind.Stage, stageModel);
+                Check("toolbar_file_buttons_use_dialog_seam" + (savedAs && openCancelled ? "" : " [savedAs=" + savedAs + " cancelled=" + openCancelled + "]"),
+                    savedAs && openCancelled && ui.Error.Length == 0 && a != null && b != null && stage != null &&
+                    string.Equals(ui.ProjectPath, Path.GetFullPath(sceneFile), StringComparison.OrdinalIgnoreCase) &&
+                    ui.Scene.Objects.Select(item => item.Id).SequenceEqual(ids));
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
 
             // H1-01c: cancel a scene open during its second entry; the running scene must be untouched.
             yield return null; // let owners released by the previous open finish their deferred Destroy

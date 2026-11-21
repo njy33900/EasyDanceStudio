@@ -95,7 +95,7 @@ namespace MmdStudio.Poc
             IconButton(toolbar, "OpenScene", MmdIconKind.Open, "열기 — .mmdscene 장면 파일", () => RequestDiscardOrSave(() =>
             {
                 string path;
-                try { path = WindowsRuntimeFilePicker.OpenScene(); }
+                try { path = FileDialogs.OpenScene(); }
                 catch (Exception ex) { Error = ex.Message; Refresh(); return; }
                 if (path == null) { message = "파일 선택을 취소했습니다."; Refresh(); return; }
                 StartCoroutine(LoadScene(path));
@@ -123,7 +123,7 @@ namespace MmdStudio.Poc
         {
             if (Busy) return false;
             var suggested = ProjectPath == null ? "새 장면" + MmdSceneDocument.Extension : Path.GetFileName(ProjectPath);
-            var path = WindowsRuntimeFilePicker.SaveScene(suggested);
+            var path = FileDialogs.SaveScene(suggested);
             if (path == null) { message = "저장을 취소했습니다."; return false; }
             return SaveTo(path);
         }
