@@ -24,7 +24,7 @@ namespace MmdStudio.Poc
         private MmdIcon playIcon;
         private Vector3Field position, rotation, scale;
         private Toggle visible, loop, physics;
-        private Label physicsInfo;
+        private Label physicsInfo, motionFitInfo;
         private VisualElement physicsParts;
         private DropdownField springPreset;
         private Label springInfo;
@@ -155,6 +155,8 @@ namespace MmdStudio.Poc
 
             motionSection = Section(content, "MotionSection", "모션");
             motionInfo = Text(motionSection, "", "eds-section-text"); motionInfo.name = "MotionInfo";
+            // D-03: what of the motion the model cannot show, in the user's words.
+            motionFitInfo = Text(motionSection, "", "eds-note"); motionFitInfo.name = "MotionFitInfo";
             connect = TextButton(motionSection, "ConnectMotion", "VMD 연결", () => Pick(PickKind.Motion), "eds-button--block");
             // PH-03: experimental per-character physics, baked ahead of playback.
             physics = new Toggle("물리 (실험)") { name = "Physics" }; motionSection.Add(physics);
@@ -328,6 +330,9 @@ namespace MmdStudio.Poc
                 motionInfo.text = missingMotion != null ? "VMD 누락: " + missingMotion + "\n다른 VMD를 연결하면 대체됩니다. 연결 전에는 저장해도 경로가 유지됩니다." :
                     selected.MotionSource == null ? "연결된 VMD가 없습니다." : Path.GetFileName(selected.MotionSource) +
                     (selected.Motion != null ? " · " + selected.Motion.Summary.durationSeconds.ToString("F1") + "초" : "");
+                var fit = selected.Motion == null ? "" : MmdMotionFit.Describe(MmdMotionFit.Diagnose(selected.Motion.Summary.missingBones,
+                    selected.Motion.Summary.missingMorphs, selected.Model.model.bones.Select(bone => bone.originalName.ToString())));
+                motionFitInfo.text = fit; Show(motionFitInfo, fit.Length > 0);
                 var summary = selected.Summary;
                 materialInfo.text = "재질 " + summary.materials + "개 · 텍스처 " + summary.loadedTextures + "/" + summary.textureSlots +
                     (summary.warnings.Length > 0 ? "\n" + string.Join("\n", summary.warnings) : "");

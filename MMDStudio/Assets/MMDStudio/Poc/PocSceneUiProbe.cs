@@ -1001,7 +1001,10 @@ namespace MmdStudio.Poc
             if (outputError != null) { Finish(path, report, outputError); yield break; }
             string autoError = null;
             yield return AutoCameraChecks(ui, path, error => autoError = error);
-            Finish(path, report, autoError);
+            if (autoError != null) { Finish(path, report, autoError); yield break; }
+            string fitError = null;
+            yield return MotionFitChecks(ui, path, error => fitError = error);
+            Finish(path, report, fitError);
         }
 
         // ----- H2a-03 audio -----
@@ -1968,6 +1971,100 @@ namespace MmdStudio.Poc
                     stored.generator.version == AutoCameraSettings.Version && stored.generator.seed == 8 && stored.generator.cutBars == 2 &&
                     Math.Abs(stored.generator.bpm - 128) < .5 && stored.generator.audio == "dance-128.wav" && stored.path.EndsWith("scene.autocam-8.vmd") &&
                     ui.LastAutoCamera != null && ui.LastAutoCamera.seed == 8 && ui.Root.Q<IntegerField>("AutoCameraSeed").value == 8 && ui.Scene.CameraMotion != null);
+            }
+            catch (Exception ex) { fail(ex.ToString()); }
+        }
+        // ----- D-03 motion fit diagnosis -----
+        // A small VMD keying semi-standard bones, an unknown bone and three morphs (names in Shift-JIS).
+        private static void WriteFitFixture(string path)
+        {
+            var bones = new[]
+            {
+                new byte[] { 0x83, 0x4F, 0x83, 0x8B, 0x81, 0x5B, 0x83, 0x75 },             // グルーブ
+                new byte[] { 0x8F, 0xE3, 0x94, 0xBC, 0x90, 0x67, 0x32 },                   // 上半身2
+                new byte[] { 0x8D, 0xB6, 0x98, 0x72, 0x9D, 0x80 },                         // 左腕捩
+                new byte[] { 0x83, 0x5A, 0x83, 0x93, 0x83, 0x5E, 0x81, 0x5B },             // センター
+                new byte[] { 0x91, 0xB6, 0x8D, 0xDD, 0x82, 0xB5, 0x82, 0xC8, 0x82, 0xA2, 0x8D, 0x9C }, // 存在しない骨
+            };
+            var morphs = new[]
+            {
+                new byte[] { 0x82, 0xA0 },                                                 // あ
+                new byte[] { 0x82, 0xDC, 0x82, 0xCE, 0x82, 0xBD, 0x82, 0xAB },             // まばたき
+                new byte[] { 0x82, 0xC8, 0x82, 0xA2, 0x83, 0x82, 0x81, 0x5B, 0x83, 0x74 }, // ないモーフ
+            };
+            byte[] Name(byte[] name) { var fixedName = new byte[15]; Array.Copy(name, fixedName, name.Length); return fixedName; }
+            using (var writer = new BinaryWriter(File.Create(path)))
+            {
+                writer.Write(System.Text.Encoding.ASCII.GetBytes("Vocaloid Motion Data 0002".PadRight(30, '\0')));
+                writer.Write(new byte[20]);
+                writer.Write((uint)(bones.Length * 2));
+                foreach (var bone in bones)
+                    foreach (var frame in new uint[] { 0, 30 })
+                    {
+                        writer.Write(Name(bone)); writer.Write(frame);
+                        writer.Write(0f); writer.Write(frame == 0 ? 0f : .5f); writer.Write(0f);
+                        writer.Write(0f); writer.Write(0f); writer.Write(0f); writer.Write(1f);
+                        var interpolation = new byte[64];
+                        for (var i = 0; i < 64; i++) interpolation[i] = (byte)(i % 16 < 8 ? 20 : 107);
+                        writer.Write(interpolation);
+                    }
+                writer.Write((uint)(morphs.Length * 2));
+                foreach (var morph in morphs)
+                    foreach (var frame in new uint[] { 0, 30 }) { writer.Write(Name(morph)); writer.Write(frame); writer.Write(frame == 0 ? 0f : 1f); }
+                writer.Write(0u); writer.Write(0u); writer.Write(0u);
+            }
+        }
+        private IEnumerator MotionFitChecks(MmdSceneWorkspace ui, string path, Action<string> fail)
+        {
+            var fixture = Path.Combine(Path.GetDirectoryName(path), "fit-fixture.vmd");
+            MmdSceneService.SceneObject target = null;
+            try
+            {
+                WriteFitFixture(fixture);
+                target = ui.Scene.Objects.First(o => o.Kind == MmdSceneService.ObjectKind.Character);
+                ui.Select(target.Id);
+            }
+            catch (Exception ex) { fail(ex.ToString()); yield break; }
+            yield return ui.ApplyPickerResult(fixture, MmdSceneWorkspace.PickKind.Motion);
+            try
+            {
+                var modelBones = new HashSet<string>(target.Model.model.bones.Select(b => b.originalName.ToString()));
+                var modelMorphs = new HashSet<string>(target.Model.model.morphs.Select(m => m.originalName.ToString()));
+                var text = ui.Root.Q<Label>("MotionFitInfo").text;
+                var expectedBones = new[] { "グルーブ", "上半身2", "左腕捩", "センター", "存在しない骨" }.Where(b => !modelBones.Contains(b)).ToArray();
+                var semiShown = expectedBones.Where(b => b != "存在しない骨" && b != "センター").All(b => text.Contains(b));
+                var symptoms = (!expectedBones.Contains("グルーブ") || text.Contains("상하 움직임")) && (!expectedBones.Contains("左腕捩") || text.Contains("팔 비틀림"));
+                var unknown = text.Contains("그 밖의 본") && text.Contains("存在しない骨");
+                var morphCount = new[] { "あ", "まばたき", "ないモーフ" }.Count(m => !modelMorphs.Contains(m));
+                var morphs = text.Contains("모프 " + morphCount + "개 없음");
+                var summary = target.Motion.Summary;
+                Check("motion_fit_diagnosis_in_user_words [missing bones " + string.Join("/", summary.missingBones) + ", morphs " + string.Join("/", summary.missingMorphs) + "]",
+                    semiShown && symptoms && unknown && morphs && summary.missingBones.SequenceEqual(expectedBones.OrderBy(b => b, StringComparer.Ordinal)));
+                // The real dance motion against both test models (reported for docs/D03_MOTION_FIT.md).
+                var vmd = PocArguments.Value("-pocVmd");
+                var details = new List<string>();
+                if (vmd != null && File.Exists(vmd))
+                {
+                    UMT.VMDAnimation animation;
+                    using (var stream = File.OpenRead(vmd)) animation = UMT.VMDReader.Read(stream);
+                    try
+                    {
+                        var used = new HashSet<string>(animation.boneFrames.Select(f => f.boneName.ToString()));
+                        var usedMorphs = new HashSet<string>(animation.morphFrames.Select(f => f.morphName.ToString()));
+                        foreach (var item in ui.Scene.Objects.Where(o => o.Kind == MmdSceneService.ObjectKind.Character))
+                        {
+                            var bones = item.Model.model.bones.Select(b => b.originalName.ToString()).ToArray();
+                            var report = MmdMotionFit.Diagnose(used.Where(b => !bones.Contains(b)).OrderBy(b => b, StringComparer.Ordinal).ToArray(),
+                                usedMorphs.Where(m => !item.Model.model.morphs.Any(x => x.originalName.ToString() == m)).ToArray(), bones);
+                            details.Add(Path.GetFileNameWithoutExtension(item.ModelSource) + ": motion bones " + used.Count + ", missing " + report.Bones.Count +
+                                " (" + string.Join(",", report.Bones.Select(b => b.Name)) + "), morphs missing " + report.MissingMorphs + "/" + usedMorphs.Count +
+                                ", model lacks semi-standard " + string.Join(",", report.ModelLacksSemiStandard));
+                        }
+                    }
+                    finally { Destroy(animation); }
+                }
+                Debug.Log("[motion-fit] " + string.Join(" | ", details));
+                Check("motion_fit_report_for_real_motion [" + string.Join(" | ", details) + "]", details.Count >= 1 || vmd == null);
             }
             catch (Exception ex) { fail(ex.ToString()); }
         }
