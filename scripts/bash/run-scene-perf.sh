@@ -31,5 +31,7 @@ if 'reference_bloom_tonemap_shadows_medium' in rc:
   base=rc['reference_bloom_tonemap_shadows_medium']
   for n in ['plus_dof_ssao_vignette','plus_dof_ssao_vignette_high','plus_dof_ssao_vignette_low'] + [k for k in rc if k.startswith('look_')]:
     if n in rc: print('  decision 9 (render cost): %s %+.0f%% vs reference (limit +50%%)' % (n, (rc[n]/base-1)*100))
+if r.get('exportFrames'): print('  export 1080p60 MP4: %d frames in %.1f s (%.1f frames/s), %s, audio %s, %.1f MB' % (r['exportFrames'], r['exportSeconds'], r['exportFramesPerSecond'], r['exportCodec'], r['exportAudio'], r['exportBytes']/2**20))
+elif r.get('exportError'): print('  export failed:', r['exportError'])
 print('memory MB: allocated %.0f reserved %.0f mono %.0f workingset %.0f' % (r['allocatedBytes']/2**20, r['reservedBytes']/2**20, r['monoUsedBytes']/2**20, r['workingSetBytes']/2**20))
 print('notes', r['notes'])" "$A/performance.json" "$START"

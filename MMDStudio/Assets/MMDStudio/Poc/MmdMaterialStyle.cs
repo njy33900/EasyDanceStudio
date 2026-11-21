@@ -145,6 +145,7 @@ namespace MmdStudio.Poc
                     material.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha); material.SetFloat("_DstBlend", (float)BlendMode.OneMinusSrcAlpha);
                     material.SetFloat("_ZWrite", original.HasProperty("_ZWrite") ? original.GetFloat("_ZWrite") : 0);
                     material.SetOverrideTag("RenderType", "Transparent");
+                    material.SetFloat("_Surface", 1);
                 }
                 material.renderQueue = original.renderQueue; // keeps UMT's draw order (transparent sorting)
                 if (toon)

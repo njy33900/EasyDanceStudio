@@ -38,6 +38,7 @@ namespace MmdStudio.Poc
             public string OpenScene() => Answer("OpenScene");
             public string OpenAudio() => Answer("OpenAudio");
             public string OpenCameraMotion() => Answer("OpenCameraMotion");
+            public string SaveOutput(string suggestedName, string extension) => Answer("SaveOutput:" + extension);
             public string SaveScene(string suggestedName) => Answer("SaveScene:" + suggestedName);
             public string SaveText(string suggestedName) => Answer("SaveText");
         }
@@ -994,7 +995,10 @@ namespace MmdStudio.Poc
             if (audioError != null) { Finish(path, report, audioError); yield break; }
             string cameraError = null;
             yield return CameraMotionChecks(ui, path, sceneFile, error => cameraError = error);
-            Finish(path, report, cameraError);
+            if (cameraError != null) { Finish(path, report, cameraError); yield break; }
+            string outputError = null;
+            yield return OutputChecks(ui, path, sceneFile, error => outputError = error);
+            Finish(path, report, outputError);
         }
 
         // ----- H2a-03 audio -----
@@ -1574,6 +1578,247 @@ namespace MmdStudio.Poc
             ui.ApplyGraphics(savedGraphics);
             if (savedSelection != null) ui.Select(savedSelection);
         }
+        // ----- H3 output -----
+        private static double Sq(int value) => value * (double)value;
+        private static Texture2D LoadPng(string file)
+        {
+            var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+            texture.LoadImage(File.ReadAllBytes(file));
+            return texture;
+        }
+        private static bool NoTemporaryFiles(string directory) =>
+            !Directory.GetFileSystemEntries(directory).Any(entry => Path.GetFileName(entry).StartsWith(".") && entry.EndsWith(".tmp"));
+        private IEnumerator OutputChecks(MmdSceneWorkspace ui, string path, string sceneFile, Action<string> fail)
+        {
+            var dir = Path.Combine(Path.GetDirectoryName(path), "output");
+            var small = new OutputData { preset = OutputData.Custom, width = 640, height = 360, fps = 30, guides = true };
+            var savedGraphics = ui.Graphics.Settings;
+            try
+            {
+                if (Directory.Exists(dir)) Directory.Delete(dir, true);
+                Directory.CreateDirectory(dir);
+                // 1. Integer frame timing.
+                var t = MmdOutputTiming.TicksPerSecond;
+                var long30 = MmdOutputTiming.FrameCount(0, MmdOutputTiming.ToTicks(1800), 60);
+                var last = MmdOutputTiming.FrameSeconds(MmdOutputTiming.ToTicks(1.25), 599, 60);
+                Check("output_frame_timing_uses_integer_ticks", MmdOutputTiming.FrameCount(0, MmdOutputTiming.ToTicks(10), 60) == 600 &&
+                    MmdOutputTiming.FrameCount(MmdOutputTiming.ToTicks(.5), MmdOutputTiming.ToTicks(1), 30) == 15 &&
+                    MmdOutputTiming.FrameCount(0, t / 3, 60) == 20 && MmdOutputTiming.FrameCount(0, t / 3 + 1, 60) == 21 && long30 == 108000 &&
+                    Math.Abs(MmdOutputTiming.FrameSeconds(0, 107999, 60) - 107999 / 60.0) < 1e-9 && Math.Abs(last - (1.25 + 599 / 60.0)) < 1e-12 &&
+                    MmdOutputTiming.AudioSample(0, 1, 60, 44100) == 735 && MmdOutputTiming.AudioSample(MmdOutputTiming.ToTicks(.5), 0, 30, 48000) == 24000);
+                // Deterministic frames for the comparisons: no SSAO blue noise.
+                var plain = ui.Graphics.Settings; plain.ssaoEnabled = false; ui.Graphics.Apply(plain);
+                ui.Scene.Seek(.75);
+                ui.StartOutput(MmdSceneWorkspace.OutputFormat.Png, small, 0, 0, Path.Combine(dir, "frame-a.png"));
+            }
+            catch (Exception ex) { fail(ex.ToString()); yield break; }
+            yield return null;
+            while (ui.Busy) yield return null;
+            Screen.SetResolution(1600, 900, false);
+            for (var i = 0; i < 6; i++) yield return null;
+            try { ui.StartOutput(MmdSceneWorkspace.OutputFormat.Png, small, 0, 0, Path.Combine(dir, "frame-b.png")); }
+            catch (Exception ex) { fail(ex.ToString()); yield break; }
+            yield return null;
+            while (ui.Busy) yield return null;
+            Screen.SetResolution(1280, 720, false);
+            for (var i = 0; i < 6; i++) yield return null;
+            byte[] readOnlyBytes = null; var readOnly = Path.Combine(dir, "locked.png");
+            try
+            {
+                var a = LoadPng(Path.Combine(dir, "frame-a.png")); var b = LoadPng(Path.Combine(dir, "frame-b.png"));
+                var pa = a.GetPixels32(); var pb = b.GetPixels32();
+                var maxDiff = pa.Zip(pb, (x, y) => Math.Max(Math.Abs(x.r - y.r), Math.Max(Math.Abs(x.g - y.g), Math.Abs(x.b - y.b)))).Max();
+                var opaque = pa.All(p => p.a == 255);
+                Check("png_capture_size_opaque_ui_free_and_window_independent [max channel diff " + maxDiff + "]", a.width == 640 && a.height == 360 && opaque &&
+                    maxDiff <= 3 && Math.Abs(ui.Scene.Seconds - .75) < 1e-9 && ui.Error.Length == 0 && NoTemporaryFiles(dir));
+                Destroy(a); Destroy(b);
+                // A write that cannot complete leaves the existing file as it was.
+                File.WriteAllBytes(readOnly, new byte[] { 1, 2, 3 });
+                File.SetAttributes(readOnly, FileAttributes.ReadOnly); readOnlyBytes = File.ReadAllBytes(readOnly);
+                ui.StartOutput(MmdSceneWorkspace.OutputFormat.Png, small, 0, 0, readOnly);
+            }
+            catch (Exception ex) { fail(ex.ToString()); yield break; }
+            yield return null;
+            while (ui.Busy) yield return null;
+            var mp4 = Path.Combine(dir, "clip.mp4");
+            try
+            {
+                var lockedKept = ui.Error.Contains("출력하지 못했습니다") && File.ReadAllBytes(readOnly).SequenceEqual(readOnlyBytes) && NoTemporaryFiles(dir);
+                File.SetAttributes(readOnly, FileAttributes.Normal);
+                if (!lockedKept) throw new InvalidOperationException("png_write_failure_keeps_existing_file [error='" + ui.Error + "']");
+                // 2. MP4: one second at 30 fps, then half a second at 60 fps.
+                var summary = ui.OutputSummary(MmdSceneWorkspace.OutputFormat.Mp4, small, 0, 1);
+                if (!summary.Contains("프레임 30개")) throw new InvalidOperationException("estimate shown before output: " + summary);
+                ui.StartOutput(MmdSceneWorkspace.OutputFormat.Mp4, small, 0, 1, mp4);
+            }
+            catch (Exception ex) { fail(ex.ToString()); yield break; }
+            yield return null;
+            while (ui.Busy) yield return null;
+            var mp4b = Path.Combine(dir, "clip60.mp4");
+            MmdMediaWriter.ProbeInfo first = default;
+            try
+            {
+                if (ui.Error.Length > 0) throw new InvalidOperationException("mp4 output failed: " + ui.Error);
+                first = MmdMediaWriter.Probe(mp4);
+                var sixty = small.Clone(); sixty.fps = 60;
+                ui.StartOutput(MmdSceneWorkspace.OutputFormat.Mp4, sixty, .5, 1, mp4b);
+            }
+            catch (Exception ex) { fail(ex.ToString()); yield break; }
+            yield return null;
+            while (ui.Busy) yield return null;
+            // The encoded frame 15 of the 30 fps clip against a PNG of the same scene time.
+            try { ui.Scene.Seek(.5); ui.StartOutput(MmdSceneWorkspace.OutputFormat.Png, small, 0, 0, Path.Combine(dir, "frame-15.png")); }
+            catch (Exception ex) { fail(ex.ToString()); yield break; }
+            yield return null;
+            while (ui.Busy) yield return null;
+            try
+            {
+                ui.Scene.Seek(.75);
+                var decoded = MmdMediaWriter.ReadVideoFrame(mp4, 15, 640, 360);
+                var reference = LoadPng(Path.Combine(dir, "frame-15.png")).GetPixels32(); // bottom-up, like the decoded frame
+                double mse = 0, flipped = 0;
+                for (var y = 0; y < 360; y++)
+                    for (var x = 0; x < 640; x++)
+                    {
+                        var r = reference[y * 640 + x]; var d = (y * 640 + x) * 4; var f = ((359 - y) * 640 + x) * 4;
+                        mse += Sq(decoded[d + 2] - r.r) + Sq(decoded[d + 1] - r.g) + Sq(decoded[d] - r.b);
+                        flipped += Sq(decoded[f + 2] - r.r) + Sq(decoded[f + 1] - r.g) + Sq(decoded[f] - r.b);
+                    }
+                double Psnr(double total) => 10 * Math.Log10(255.0 * 255 / Math.Max(1e-9, total / (640 * 360 * 3)));
+                var psnr = Psnr(mse); var psnrFlipped = Psnr(flipped);
+                Check("mp4_frame_matches_rendered_frame [PSNR " + psnr.ToString("0.0") + " dB, upside down " + psnrFlipped.ToString("0.0") + " dB]", psnr > 30 && psnr > psnrFlipped + 3);
+            }
+            catch (Exception ex) { fail(ex.ToString()); yield break; }
+            var clicks = Path.Combine(dir, "clicks.wav");
+            try
+            {
+                var second = MmdMediaWriter.Probe(mp4b);
+                bool Ok(MmdMediaWriter.ProbeInfo p, int frames, int fps) => p.VideoCodecName == "H264" && p.width == 640 && p.height == 360 && p.videoFrames == frames &&
+                    p.fpsNum == fps && p.fpsDen == 1 && Math.Abs(p.videoDuration - frames * 10000000L / fps) <= 10000000L / fps && p.firstVideoTime == 0;
+                Check("mp4_frame_count_duration_size_and_codec [30fps: " + first.videoFrames + " frames " + (first.videoDuration / 1e7).ToString("0.000") + " s " + first.VideoCodecName +
+                    " audio " + first.AudioCodecName + "; 60fps: " + second.videoFrames + " frames " + (second.videoDuration / 1e7).ToString("0.000") + " s]",
+                    Ok(first, 30, 30) && Ok(second, 30, 60) && first.AudioCodecName == "AAC" && NoTemporaryFiles(dir));
+                // 3. Audio sync: clicks at known scene times, measured in the decoded MP4 audio.
+                const int rate = 48000;
+                var samples = new float[rate * 3];
+                foreach (var at in new[] { .25, 1.5, 2.75 })
+                    for (var i = 0; i < rate / 100; i++) samples[(int)(at * rate) + i] = .8f * Mathf.Sin(2 * Mathf.PI * 1000 * i / rate);
+                MmdWavReader.Write(clicks, samples, 1, rate);
+            }
+            catch (Exception ex) { fail(ex.ToString()); yield break; }
+            yield return ui.ApplyPickerResult(clicks, MmdSceneWorkspace.PickKind.Audio);
+            var synced = Path.Combine(dir, "sync.mp4");
+            try
+            {
+                if (ui.Scene.Audio == null || !ui.Scene.Audio.Source.EndsWith("clicks.wav")) throw new InvalidOperationException("click track not connected: " + ui.Error);
+                ui.Scene.AudioVolume = 1; ui.Scene.AudioMuted = false;
+                var sync = small.Clone(); sync.fps = 60;
+                ui.StartOutput(MmdSceneWorkspace.OutputFormat.Mp4, sync, 0, 3, synced);
+            }
+            catch (Exception ex) { fail(ex.ToString()); yield break; }
+            yield return null;
+            while (ui.Busy) yield return null;
+            var cancelTarget = Path.Combine(dir, "existing.mp4");
+            try
+            {
+                var info = MmdMediaWriter.Probe(synced);
+                var pcm = MmdMediaWriter.ReadAudio(synced, 48000 * 4, out var decodedRate, out var channels);
+                var onsets = new List<double>();
+                var threshold = (short)(.3f * 32767);
+                for (var i = 0; i < pcm.Length / channels; i++)
+                    if (Math.Abs(pcm[i * channels]) > threshold && (onsets.Count == 0 || i / (double)decodedRate - onsets[onsets.Count - 1] > .5))
+                        onsets.Add(i / (double)decodedRate + info.firstAudioTime / 1e7);
+                var expected = new[] { .25, 1.5, 2.75 };
+                var errors = onsets.Count == 3 ? onsets.Zip(expected, (o, e) => Math.Abs(o - e)).ToArray() : new[] { 1.0 };
+                var frame = 1.0 / 60;
+                Check("mp4_audio_sync_within_one_frame [onsets " + string.Join(", ", onsets.Select(o => o.ToString("0.0000"))) + " s, error ms " +
+                    string.Join("/", errors.Select(e => (e * 1000).ToString("0.0"))) + ", audio " + (info.audioDuration / 1e7).ToString("0.000") + " s video " + (info.videoDuration / 1e7).ToString("0.000") + " s, " + decodedRate + " Hz]",
+                    info.videoFrames == 180 && errors.All(e => e < frame) && Math.Abs(info.audioDuration - info.videoDuration) / 1e7 < frame && info.sampleRate == 48000);
+                // 4. Cancel half way: the existing file is untouched and nothing is left behind.
+                File.WriteAllBytes(cancelTarget, new byte[] { 9, 8, 7 });
+                var longer = small.Clone(); longer.fps = 60;
+                ui.StartOutput(MmdSceneWorkspace.OutputFormat.Mp4, longer, 0, 3, cancelTarget);
+            }
+            catch (Exception ex) { fail(ex.ToString()); yield break; }
+            var waited = 0;
+            while (ui.Busy && !ui.Root.Q<Label>("LoadingLabel").text.Contains("/180") && waited++ < 600) yield return null;
+            try { Activate(ui.Root, "CancelLoading"); }
+            catch (Exception ex) { fail(ex.ToString()); yield break; }
+            while (ui.Busy) yield return null;
+            try
+            {
+                var cancelledOk = ui.LastOutputCancelled && File.ReadAllBytes(cancelTarget).SequenceEqual(new byte[] { 9, 8, 7 }) && NoTemporaryFiles(dir) &&
+                    Math.Abs(ui.Scene.Seconds - .75) < 1e-9 && !ui.Busy;
+                // Missing folder: reported, nothing written.
+                ui.StartOutput(MmdSceneWorkspace.OutputFormat.Mp4, small, 0, 1, Path.Combine(dir, "missing-folder", "x.mp4"));
+                if (!cancelledOk) throw new InvalidOperationException("mp4_cancel_keeps_existing_file [cancelled=" + ui.LastOutputCancelled + " seconds=" + ui.Scene.Seconds + "]");
+            }
+            catch (Exception ex) { fail(ex.ToString()); yield break; }
+            yield return null;
+            while (ui.Busy) yield return null;
+            try
+            {
+                Check("output_cancel_and_failure_leave_existing_files_and_no_temporaries", ui.Error.Contains("출력 폴더가 없습니다") && !Directory.Exists(Path.Combine(dir, "missing-folder")) && NoTemporaryFiles(dir));
+                // 5. Portrait guide and framing inside it; landscape hides it.
+                var portrait = new OutputData { preset = OutputData.Portrait, fps = 60, guides = true };
+                ui.SetOutput(portrait);
+                var guide = ui.OutputGuideScreenRect();
+                var shown = ui.OutputGuideVisible && Math.Abs(guide.width - Screen.height * 9f / 16) < 1 && Math.Abs(guide.center.x - Screen.width * .5f) < 1;
+                Activate(ui.Root, "FrameAll");
+                MmdSceneWorkspace.TryBounds(ui.Scene.Objects.Where(o => o.Visible), out var all);
+                var inside = BoundsInside(all, Rect.MinMaxRect(guide.xMin, 0, guide.xMax, Screen.height));
+                var square = new OutputData { preset = OutputData.Square, guides = true }; ui.SetOutput(square);
+                var squareShown = ui.OutputGuideVisible && Math.Abs(ui.OutputGuideScreenRect().width - Screen.height) < 1;
+                ui.SetOutput(new OutputData());
+                Check("portrait_and_square_guides_and_framing_inside_output [shown=" + shown + " inside=" + inside + " square=" + squareShown + "]",
+                    shown && inside && squareShown && !ui.OutputGuideVisible);
+                // 6. Transparent PNG sequence: characters only, straight alpha.
+                var sequence = new OutputData { preset = OutputData.Custom, width = 480, height = 270, fps = 30 };
+                ui.StartOutput(MmdSceneWorkspace.OutputFormat.PngSequence, sequence, .5, .6, Path.Combine(dir, "alpha.png"));
+            }
+            catch (Exception ex) { fail(ex.ToString()); yield break; }
+            yield return null;
+            while (ui.Busy) yield return null;
+            try
+            {
+                var files = Enumerable.Range(0, 3).Select(i => Path.Combine(dir, "alpha_" + i.ToString("D6") + ".png")).ToArray();
+                var ok = files.All(File.Exists) && !File.Exists(Path.Combine(dir, "alpha_000003.png")) && NoTemporaryFiles(dir);
+                var texture = ok ? LoadPng(files[1]) : null;
+                var pixels = texture != null ? texture.GetPixels32() : new Color32[0];
+                var clear = pixels.Count(p => p.a == 0); var solid = pixels.Count(p => p.a == 255);
+                var corners = texture != null && new[] { pixels[0], pixels[texture.width - 1], pixels[pixels.Length - 1], pixels[pixels.Length - texture.width] }.All(p => p.a == 0);
+                var stageBack = ui.Scene.Objects.Where(o => o.Kind == MmdSceneService.ObjectKind.Stage).All(o => o.Model.root.GetComponentsInChildren<Renderer>(true).All(r => r.enabled == o.Visible));
+                Check("transparent_png_sequence_characters_only_with_alpha [" + (texture == null ? "missing" : texture.width + "x" + texture.height) + ", clear " + clear + ", solid " + solid + "]",
+                    ok && texture.width == 480 && texture.height == 270 && corners && solid > 50 && clear > pixels.Length / 2 && stageBack &&
+                    Camera.main.backgroundColor.a > .99f && Camera.main.allowHDR);
+                if (texture != null) Destroy(texture);
+                ui.Graphics.Apply(savedGraphics);
+                // 7. The toolbar button and dialog (scripted file dialog).
+                Activate(ui.Root, "Output");
+                var dialogShown = ui.DialogVisible && ui.Root.Q<Label>("OutputSummary").text.Contains("프레임");
+                ui.Root.Q<DropdownField>("OutputFormat").value = "PNG 이미지 (현재 프레임)";
+                ui.Root.Q<DropdownField>("OutputPreset").value = "정사각 1080×1080";
+                if (!dialogShown) throw new InvalidOperationException("output dialog not shown");
+                var dialogs = new ScriptedDialogs { Next = Path.Combine(dir, "dialog.png") }; outputDialogs = dialogs;
+                ui.FileDialogs = dialogs;
+                Activate(ui.Root, "OutputStart");
+            }
+            catch (Exception ex) { fail(ex.ToString()); yield break; }
+            yield return null;
+            while (ui.Busy) yield return null;
+            try
+            {
+                var texture = File.Exists(Path.Combine(dir, "dialog.png")) ? LoadPng(Path.Combine(dir, "dialog.png")) : null;
+                Check("output_dialog_asks_for_the_file_and_writes_it", outputDialogs.Asked == "SaveOutput:png" && texture != null && texture.width == 1080 && texture.height == 1080 &&
+                    ui.Output.preset == OutputData.Square && !ui.DialogVisible);
+                if (texture != null) Destroy(texture);
+                // Saved with the scene (checked again on relaunch).
+                if (!ui.SaveTo(sceneFile)) throw new InvalidOperationException("save with output settings failed: " + ui.Error);
+                Check("output_settings_saved_with_scene", MmdSceneDocument.Read(sceneFile).output.preset == OutputData.Square);
+            }
+            catch (Exception ex) { fail(ex.ToString()); }
+        }
+        private ScriptedDialogs outputDialogs;
         // ----- H2a-05 look presets -----
         private static void SaveRendered(Camera camera, string file)
         {

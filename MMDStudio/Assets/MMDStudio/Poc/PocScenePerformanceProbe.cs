@@ -44,6 +44,11 @@ namespace MmdStudio.Poc
             public long allocatedBytes, reservedBytes, monoUsedBytes, workingSetBytes;
             public Pass[] passes;
             public RenderCost[] renderCosts;
+            // H3-02: 1080p60 MP4 of the reference scene (with the song when it sits beside the VMD).
+            public float exportSeconds, exportFramesPerSecond, exportSceneSeconds;
+            public int exportFrames;
+            public long exportBytes;
+            public string exportCodec, exportAudio, exportError;
             public string[] notes;
         }
 
@@ -153,6 +158,24 @@ namespace MmdStudio.Poc
             yield return Measure("effects_on_shadows_high", 2, 15, passes);
             ui.Scene.Playing = false;
             report.passes = passes.ToArray();
+            var song = Directory.GetFiles(Path.GetDirectoryName(vmd), "*.wav").FirstOrDefault();
+            if (song != null) yield return ui.ApplyPickerResult(song, MmdSceneWorkspace.PickKind.Audio);
+            var exportPath = Path.Combine(Path.GetDirectoryName(reportPath), "export-1080p60.mp4");
+            var exportStart = Math.Min(30, ui.Scene.Duration * .2);
+            ui.StartOutput(MmdSceneWorkspace.OutputFormat.Mp4, new OutputData { fps = 60 }, exportStart, exportStart + 10, exportPath);
+            yield return null;
+            while (ui.Busy) yield return null;
+            report.exportError = ui.Error;
+            report.exportSceneSeconds = 10;
+            if (File.Exists(exportPath))
+            {
+                var info = MmdMediaWriter.Probe(exportPath);
+                report.exportSeconds = (float)ui.LastOutputSeconds; report.exportFrames = (int)info.videoFrames;
+                report.exportFramesPerSecond = (float)(info.videoFrames / Math.Max(1e-3, ui.LastOutputSeconds));
+                report.exportBytes = new FileInfo(exportPath).Length;
+                report.exportCodec = info.VideoCodecName + " " + info.width + "x" + info.height + " " + info.fpsNum + "/" + info.fpsDen;
+                report.exportAudio = info.AudioCodecName + " " + info.sampleRate + " Hz " + info.channels + " ch " + (info.audioDuration / 1e7).ToString("0.000") + " s";
+            }
 
             report.allocatedBytes = Profiler.GetTotalAllocatedMemoryLong();
             report.reservedBytes = Profiler.GetTotalReservedMemoryLong();

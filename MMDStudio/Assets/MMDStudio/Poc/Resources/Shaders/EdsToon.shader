@@ -24,6 +24,7 @@ Shader "EasyDanceStudio/Toon"
         [Enum(UnityEngine.Rendering.BlendMode)] _SrcBlend ("Src Blend", Float) = 1
         [Enum(UnityEngine.Rendering.BlendMode)] _DstBlend ("Dst Blend", Float) = 0
         _ZWrite ("ZWrite", Float) = 1
+        _Surface ("Surface (0 opaque, 1 transparent)", Float) = 0
     }
 
     SubShader
@@ -45,6 +46,7 @@ Shader "EasyDanceStudio/Toon"
             half _LightScale;
             half4 _OutlineColor;
             float _OutlineWidth;
+            half _Surface;
         CBUFFER_END
         TEXTURE2D(_BaseMap); SAMPLER(sampler_BaseMap);
         ENDHLSL
@@ -54,7 +56,7 @@ Shader "EasyDanceStudio/Toon"
             Name "ForwardToon"
             Tags { "LightMode" = "UniversalForward" }
             Cull [_Cull]
-            Blend [_SrcBlend] [_DstBlend]
+            Blend [_SrcBlend] [_DstBlend], One OneMinusSrcAlpha
             ZWrite [_ZWrite]
 
             HLSLPROGRAM
@@ -105,7 +107,7 @@ Shader "EasyDanceStudio/Toon"
                 half rim = pow(saturate(1 - dot(normal, view)), _RimPower) * _RimStrength * saturate(lit + 0.25h);
                 half3 colour = base.rgb * shade * lightColour + rim * lightColour;
                 colour = MixFog(colour, input.fogFactor);
-                return half4(colour, base.a);
+                return half4(colour, _Surface > 0.5h ? base.a : 1);
             }
             ENDHLSL
         }
@@ -115,7 +117,7 @@ Shader "EasyDanceStudio/Toon"
             Name "Outline"
             Tags { "LightMode" = "SRPDefaultUnlit" }
             Cull Front
-            Blend [_SrcBlend] [_DstBlend]
+            Blend [_SrcBlend] [_DstBlend], One OneMinusSrcAlpha
             ZWrite [_ZWrite]
 
             HLSLPROGRAM
@@ -139,7 +141,7 @@ Shader "EasyDanceStudio/Toon"
             half4 Frag(Varyings input) : SV_Target
             {
                 half alpha = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.uv).a * _BaseColor.a * _OutlineColor.a;
-                return half4(_OutlineColor.rgb, alpha);
+                return half4(_OutlineColor.rgb, _Surface > 0.5h ? alpha : 1);
             }
             ENDHLSL
         }

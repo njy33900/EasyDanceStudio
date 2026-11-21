@@ -91,6 +91,7 @@ namespace MmdStudio.Poc
             Element(topbar, "eds-spacer").pickingMode = PickingMode.Ignore;
             BuildProjectToolbar(topbar);
             Element(topbar, "eds-divider-v");
+            IconButton(topbar, "Output", MmdIconKind.Export, "출력 — PNG·MP4·투명 PNG 시퀀스", ShowOutputDialog);
             IconButton(topbar, "FrameAll", MmdIconKind.Frame, "전체 보기 — 보이는 모든 항목에 카메라 맞춤", () => Guard(() => { ReleaseCameraMotion(); FrameAll(); }));
 
             var body = Element(Root, "eds-body"); body.pickingMode = PickingMode.Ignore;
@@ -120,6 +121,7 @@ namespace MmdStudio.Poc
             viewportHint = Text(viewport, "좌클릭 선택 · 우클릭 회전 · 휠클릭 이동 · 휠 확대 · W/E/R 기즈모 · F 맞춤 · Space 재생 · Delete 삭제 · H 집중 보기", "eds-viewport-hint");
             viewportHint.name = "ViewportHint"; viewportHint.pickingMode = PickingMode.Ignore;
             BuildGizmoUi(viewport);
+            BuildOutputGuide(viewport);
             body.Insert(0, viewportWrap); // 3D overlays paint behind the floating cards.
 
             // ----- Inspector: selection header, then stacked sections -----
@@ -348,6 +350,7 @@ namespace MmdStudio.Poc
             UpdateHighlight();
             RefreshGraphics();
             RefreshAudio();
+            RefreshOutputGuide();
             RefreshLook();
             RefreshMaterial();
             RefreshCameraMotion();

@@ -190,6 +190,13 @@ namespace MmdStudio.Poc
             if (PanelVisible("PlaybackBar")) bottom = PanelPixels(playback).yMax + 12;
             else if (PanelVisible("StatusBar")) bottom = PanelPixels(statusBar).yMax + 12;
             if (right - left < 100 || top - bottom < 100) return full;
+            // H3-04: with an output guide (portrait/square), framing fits inside the output too.
+            if (OutputGuideVisible)
+            {
+                var guide = OutputGuideScreenRect();
+                var l = Mathf.Max(left, guide.xMin + 12); var r = Mathf.Min(right, guide.xMax - 12);
+                if (r - l >= 100) { left = l; right = r; }
+            }
             return Rect.MinMaxRect(left, bottom, right, top);
         }
     }

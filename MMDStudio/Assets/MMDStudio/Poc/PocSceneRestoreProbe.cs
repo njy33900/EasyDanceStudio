@@ -74,6 +74,8 @@ namespace MmdStudio.Poc
                     styles.All(s => JsonUtility.ToJson(s.live.MaterialStyle) == JsonUtility.ToJson(s.data.material) &&
                         (s.data.material.style == MaterialStyleData.Original || s.live.Model.root.GetComponentsInChildren<Renderer>(true).SelectMany(r => r.sharedMaterials)
                             .Any(m => m != null && m.shader.name == (s.data.material.style == MaterialStyleData.Toon ? "EasyDanceStudio/Toon" : "EasyDanceStudio/StageLit")))));
+                // H3: output settings (the UI probe saves the square preset).
+                Check("output_settings_restored", JsonUtility.ToJson(ui.Output) == JsonUtility.ToJson(file.output) && file.output.preset == OutputData.Square);
                 Check("characters_sampled_at_restored_time", ui.Scene.Objects.Where(item => item.Motion != null).All(item => Math.Abs(item.Motion.TimeSeconds - (float)ui.Scene.Seconds) < 1e-4f));
                 report.screenshot = Path.Combine(Path.GetDirectoryName(reportPath), "scene-restore.png");
                 ScreenCapture.CaptureScreenshot(report.screenshot);

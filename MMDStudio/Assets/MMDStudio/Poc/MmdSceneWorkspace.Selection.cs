@@ -62,7 +62,7 @@ namespace MmdStudio.Poc
         {
             if (highlight == null) return;
             var selected = Selected;
-            if (FocusView || selected == null || !selected.Visible || !TryBounds(new[] { selected }, out var bounds)) { highlight.Hide(); return; }
+            if (FocusView || Exporting || selected == null || !selected.Visible || !TryBounds(new[] { selected }, out var bounds)) { highlight.Hide(); return; }
             highlight.Show(bounds, selected.Placement.position, View.Distance);
         }
     }

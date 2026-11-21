@@ -13,6 +13,7 @@ Shader "EasyDanceStudio/StageLit"
         [Enum(UnityEngine.Rendering.BlendMode)] _SrcBlend ("Src Blend", Float) = 1
         [Enum(UnityEngine.Rendering.BlendMode)] _DstBlend ("Dst Blend", Float) = 0
         _ZWrite ("ZWrite", Float) = 1
+        _Surface ("Surface (0 opaque, 1 transparent)", Float) = 0
     }
 
     SubShader
@@ -26,6 +27,7 @@ Shader "EasyDanceStudio/StageLit"
             half4 _BaseColor;
             half _Smoothness;
             half _Metallic;
+            half _Surface;
         CBUFFER_END
         TEXTURE2D(_BaseMap); SAMPLER(sampler_BaseMap);
         ENDHLSL
@@ -35,7 +37,7 @@ Shader "EasyDanceStudio/StageLit"
             Name "ForwardLit"
             Tags { "LightMode" = "UniversalForward" }
             Cull [_Cull]
-            Blend [_SrcBlend] [_DstBlend]
+            Blend [_SrcBlend] [_DstBlend], One OneMinusSrcAlpha
             ZWrite [_ZWrite]
 
             HLSLPROGRAM
@@ -84,7 +86,7 @@ Shader "EasyDanceStudio/StageLit"
                 inputData.shadowMask = half4(1, 1, 1, 1);
                 SurfaceData surface = (SurfaceData)0;
                 surface.albedo = base.rgb;
-                surface.alpha = base.a;
+                surface.alpha = _Surface > 0.5h ? base.a : 1;
                 surface.metallic = _Metallic;
                 surface.smoothness = _Smoothness;
                 surface.specular = half3(0, 0, 0);

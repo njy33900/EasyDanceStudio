@@ -11,6 +11,9 @@ namespace MmdStudio.Poc
             ? Show(false, "PMX 모델 (*.pmx)\0*.pmx\0\0", "PMX 모델 선택", "pmx", null)
             : Show(false, "VMD 모션 (*.vmd)\0*.vmd\0\0", "VMD 모션 선택", "vmd", null);
         public static string OpenCameraMotion() => Show(false, "VMD 카메라 모션 (*.vmd)\0*.vmd\0\0", "카메라 VMD 선택", "vmd", null);
+        public static string SaveOutput(string suggestedName, string extension) => extension == "mp4"
+            ? Show(true, "MP4 동영상 (*.mp4)\0*.mp4\0\0", "동영상 출력", "mp4", suggestedName)
+            : Show(true, "PNG 이미지 (*.png)\0*.png\0\0", "이미지 출력", "png", suggestedName);
         public static string OpenAudio() => Show(false, "WAV 오디오 (*.wav)\0*.wav\0\0", "오디오 파일 선택", "wav", null);
         public static string OpenScene() => Show(false, "Easy Dance Studio 장면 (*.mmdscene)\0*.mmdscene\0\0", "장면 열기", "mmdscene", null);
         // Save dialog with overwrite confirmation; suggestedName may be null.

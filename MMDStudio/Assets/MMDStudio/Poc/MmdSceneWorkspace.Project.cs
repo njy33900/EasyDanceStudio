@@ -157,6 +157,7 @@ namespace MmdStudio.Poc
                 timeline = new TimelineData { timeSeconds = Scene.Seconds, loop = Scene.Loop, speed = Scene.Speed },
                 audio = CaptureAudio(sceneFile),
                 cameraMotion = CaptureCameraMotion(sceneFile),
+                output = Output.Clone(),
             };
             SceneObjectData Live(MmdSceneService.SceneObject item)
             {
@@ -204,7 +205,7 @@ namespace MmdStudio.Poc
         {
             if (Busy) return;
             Scene.Clear(); Scene.Loop = false; Scene.Speed = 1; ClearDocumentState();
-            ClearHistory(); ResetAudio(null, null, 1, false); ResetCameraMotion(null, null, false);
+            ClearHistory(); ResetAudio(null, null, 1, false); ResetCameraMotion(null, null, false); SetOutput(new OutputData());
             Graphics.Apply(new SceneGraphicsSettings());
             View.Reset(); View.Apply(Camera.main);
             ClearHistory();
@@ -347,6 +348,7 @@ namespace MmdStudio.Poc
                     ClearHistory();
                     ResetAudio(audio.Track, audio.Missing, file.audio.volume, file.audio.muted);
                     ResetCameraMotion(cameraMotion.Motion, cameraMotion.Missing, file.cameraMotion.follow);
+                    SetOutput(file.output);
                     Scene.Loop = file.timeline.loop; Scene.Speed = file.timeline.speed;
                     Scene.Playing = false; Scene.Seek(Math.Min(file.timeline.timeSeconds, Scene.Duration));
                     SelectedId = file.selectedId != null && (Scene.Objects.Any(item => item.Id == file.selectedId) || unresolved.ContainsKey(file.selectedId))

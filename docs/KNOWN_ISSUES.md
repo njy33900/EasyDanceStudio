@@ -17,6 +17,7 @@
 - The **transform gizmo** (MVP-10) works in world axes only: no local-space mode, plane handles or snapping.
 - Undo/redo covers edits, add/remove and VMD/WAV connection (H1-03, 200 commands); file loading itself is not recorded.
 - **Material and UV morphs** are not played; they are listed as warnings in the inspector's 재질 section.
+- **Output (H3)**: MP4 needs Windows Media Foundation (Windows N editions: install the Media Feature Pack; the app says so). Output follows scene time at 1x regardless of the playback speed. Video bitrate is a fixed average (about 0.125 bit per pixel per frame); no quality mode yet. In transparent PNG sequences post-processing changes colour only (bloom does not add alpha). A full disk is mapped to a message but was not reproduced.
 - **Light colour/intensity affect only the toon and PBR material styles** (H2b-01). The "원본" style keeps the imported URP Unlit fallback materials (lilToon is not in the project), which ignore the light. Built-in look presets switch characters to toon.
 - **Toon style limits** (H2b-01): sphere maps (matcap) are not shown; only the main directional light is used; MMD's shared toon01-10 ramps are not shipped with models, so those materials use a default shadow colour. Visual defaults await the user's reference images (decision 8).
 - **Camera VMD** (H2a-04): no model tracking (a PMM feature, not in VMD) and no orthographic projection (shown in perspective, reported). Manual navigation releases the motion; "카메라 모션 따라가기" resumes it.
