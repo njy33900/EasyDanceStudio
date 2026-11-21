@@ -439,6 +439,27 @@ namespace MmdStudio.Poc
             }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
             yield return new WaitForSecondsRealtime(.2f);
+            // H1-02: relink the missing background to the real PMX; same ID/placement, undoable.
+            {
+                var missingButton = ui.Root.Q<Button>("MissingRelink");
+                if (missingButton == null || !missingButton.enabledInHierarchy) { Finish(path, report, "MissingRelink button unavailable"); yield break; }
+            }
+            yield return ui.RelinkMissing(stageEntry.id, stageModel);
+            try
+            {
+                var relinked = ui.Scene.Objects.FirstOrDefault(item => item.Id == stageEntry.id);
+                var linked = relinked != null && relinked.Kind == MmdSceneService.ObjectKind.Stage && ui.Error.Length == 0 && ui.UnresolvedCount == 0 &&
+                    ui.UnresolvedMotionCount == 1 && relinked.Placement.localPosition == stageEntry.position && relinked.Placement.localScale == stageEntry.scale &&
+                    relinked.Visible == stageEntry.visible && ui.SelectedId == stageEntry.id && ui.Dirty &&
+                    string.Equals(relinked.ModelSource, Path.GetFullPath(stageModel), StringComparison.OrdinalIgnoreCase) && ui.UndoLabel == "파일 다시 연결";
+                UndoKey();
+                var undone = ui.UnresolvedCount == 1 && ui.Scene.Objects.All(item => item.Id != stageEntry.id) && !ui.Dirty;
+                RedoKey();
+                var redone = ui.UnresolvedCount == 0 && ui.Scene.Objects.Any(item => item.Id == stageEntry.id);
+                UndoKey(); // back to the missing state for the delete check below
+                Check("relink_missing_pmx_keeps_id_and_placement_and_undoes", linked && undone && redone && ui.UnresolvedCount == 1);
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
             try
             {
                 var inspected = true;

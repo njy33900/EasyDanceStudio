@@ -140,8 +140,9 @@ namespace MmdStudio.Poc
 
             missingSection = Section(content, "MissingSection", "누락된 파일");
             missingInfo = Text(missingSection, "", "eds-section-text"); missingInfo.name = "MissingInfo";
-            Text(missingSection, "이 항목은 장면 파일에 그대로 보존되며 저장해도 사라지지 않습니다. 파일 재연결은 다음 단계에서 지원합니다.", "eds-note");
+            Text(missingSection, "이 항목은 장면 파일에 그대로 보존되며 저장해도 사라지지 않습니다. '파일 다시 찾기'로 옮겨진 PMX를 고르면 같은 ID·배치·모션 연결을 유지한 채 다시 불러옵니다.", "eds-note");
             var missingButtons = Element(missingSection, "eds-row-buttons");
+            TextButton(missingButtons, "MissingRelink", "파일 다시 찾기", PickRelink, "eds-button--block").style.marginRight = 6;
             TextButton(missingButtons, "MissingRemove", "장면에서 항목 삭제", RequestRemove, "eds-button--block", "eds-button--danger");
 
             transformSection = Section(content, "TransformSection", "변형");

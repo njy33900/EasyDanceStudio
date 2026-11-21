@@ -263,6 +263,25 @@ namespace MmdStudio.Poc
             settleThroughFrame = Time.frameCount + 1;
         }
 
+        // H1-02: puts one prepared candidate into the scene at `index` (relink of a missing entry).
+        internal SceneObject AdoptPrepared(PreparedObject item, int index)
+        {
+            if (item?.Owner == null || item.Model == null) throw new ArgumentException("준비되지 않은 장면 항목입니다.");
+            if (objects.Any(o => o.Id == item.Id)) throw new ArgumentException("같은 ID의 항목이 이미 있습니다: " + item.Id);
+            item.Owner.transform.SetParent(transform, false);
+            foreach (var renderer in item.Model.root.GetComponentsInChildren<Renderer>()) renderer.enabled = item.Visible;
+            if (item.Motion != null) item.Motion.AcquireSceneClock(this);
+            var adopted = new SceneObject
+            {
+                Id = item.Id, Kind = item.Kind, ModelSource = item.ModelSource, MotionSource = item.MotionSource,
+                Model = item.Model, Motion = item.Motion, Owner = item.Owner, Summary = item.Summary, Visible = item.Visible,
+            };
+            objects.Insert(Mathf.Clamp(index, 0, objects.Count), adopted);
+            settleThroughFrame = Time.frameCount + 1;
+            Seek(Seconds);
+            return adopted;
+        }
+
         private SceneObject Find(string id)
         {
             var item = objects.Find(value => value.Id == id);
