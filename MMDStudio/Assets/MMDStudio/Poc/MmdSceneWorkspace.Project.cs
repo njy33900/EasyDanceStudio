@@ -23,7 +23,7 @@ namespace MmdStudio.Poc
         private bool quitConfirmed;
         private string projectId;
 
-        private void MarkDirty() { Dirty = true; }
+        private void MarkDirty() { Dirty = true; NoteDirty(); }
 
         // ----- R0-02a: unresolved references are part of the document -----
         // A scene entry whose PMX is missing or fails to load is kept verbatim (ID, type, stored

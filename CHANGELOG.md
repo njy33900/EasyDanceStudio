@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Autosave and crash recovery (H1-06): with unsaved changes the scene is written every 2 minutes to a separate recovery file (never the original); a normal save/new/open/quit removes it, and after a crash the next launch offers to restore (original path kept, marked unsaved), discard or decide later. Verified across forced kills (`scripts/bash/run-recovery.sh`).
 - Body secondary motion (PH-05, ADR-018): chest/hip spring bones for models that have those bones but no rigid bodies, with detection in the inspector, presets (light/medium/strong), "apply to all characters", a model-terms notice and per-character saving. Spring bakes are deterministic and cheap (full song 4.3 s); in a chest close-up (forced test on Sandrone) the strong preset visibly moves the chest at the largest-swing moment; tuning on a real target model is still to do.
 - Physics finish, part 1: compressed bake cache (Sandrone 158 → 71 MB, error at most 0.36 mm), jump check on visible bones only with an inspector warning, faster baking while paused (Sandrone full song in 132 s), and per-part physics strength sliders (hair, clothes, chest, hip, accessories, other; 0-100 %, instant, saved with the scene).
 - Experimental per-character physics in the scene (off by default): the inspector's "물리 (실험)" toggle bakes physics ahead of playback, shows progress, re-bakes after motion or placement changes, falls back to off for that character on failure, and is saved per character (optional schema-1 field). Release IL2CPP and Release Mono pass 130 UI and 9 restart assertions.

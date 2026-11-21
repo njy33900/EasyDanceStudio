@@ -215,6 +215,7 @@ namespace MmdStudio.Poc
             Camera.main.rect = new Rect(0, 0, 1, 1);
             View.Apply(Camera.main);
             Refresh();
+            ConfigureRecovery();
         }
 
         // ----- Small UI builders (styling lives in Resources/StudioTheme.uss) -----
@@ -765,6 +766,7 @@ namespace MmdStudio.Poc
             if (DeviceInput) ReadDevices();
             RefreshFocusNotice();
             RefreshPhysicsInfo();
+            UpdateAutosave();
         }
         // Bake progress for the selected character; also on the status bar while any bake runs.
         private string lastPhysicsText;
