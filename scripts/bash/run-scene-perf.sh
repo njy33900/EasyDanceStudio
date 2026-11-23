@@ -25,11 +25,16 @@ if 'effects_on_shadows_medium' in ps:
   base=ps['effects_on_shadows_medium']['medianFrameMs']
   for n in ('effects_on_dof_ssao_vignette','effects_on_dof_ssao_vignette_high'):
     if n in ps: print('  decision 9: %s median %.2f ms vs reference %.2f ms = %+.0f%% (limit +50%%)' % (n, ps[n]['medianFrameMs'], base, (ps[n]['medianFrameMs']/base-1)*100))
+  # v0.61: camera input during playback and screen corrections, against the same reference look.
+  for x in r['passes'] or []:
+    if x.get('inputCalls'): print('  v0.61 %-34s median %.2f ms vs %.2f ms (%+.0f%%), p95 %.2f vs %.2f; input median %.3f ms p95 %.3f worst %.2f; camera moved %d/%d frames' % (x['name'], x['medianFrameMs'], base, (x['medianFrameMs']/base-1)*100, x['p95FrameMs'], ps['effects_on_shadows_medium']['p95FrameMs'], x['inputMedianMs'], x['inputP95Ms'], x['inputWorstMs'], x['cameraMovedFrames'], x['inputCalls']))
+  if 'effects_on_screen_corrections_all_objects' in ps:
+    x = ps['effects_on_screen_corrections_all_objects']; print('  v0.61 screen corrections on all objects: median %.2f ms vs %.2f ms (%+.0f%%), p95 %.2f' % (x['medianFrameMs'], base, (x['medianFrameMs']/base-1)*100, x['p95FrameMs']))
 rc={x['name']:x['msPerRender'] for x in r.get('renderCosts') or []}
 for n,v in rc.items(): print('  render 1920x1080 %-40s %6.2f ms' % (n, v))
 if 'reference_bloom_tonemap_shadows_medium' in rc:
   base=rc['reference_bloom_tonemap_shadows_medium']
-  for n in ['plus_dof_ssao_vignette','plus_dof_ssao_vignette_high','plus_dof_ssao_vignette_low'] + [k for k in rc if k.startswith('look_')]:
+  for n in ['plus_dof_ssao_vignette','plus_dof_ssao_vignette_high','plus_dof_ssao_vignette_low','reference_with_screen_corrections_all_objects'] + [k for k in rc if k.startswith('look_')]:
     if n in rc: print('  decision 9 (render cost): %s %+.0f%% vs reference (limit +50%%)' % (n, (rc[n]/base-1)*100))
 if r.get('exportFrames'): print('  export 1080p60 MP4: %d frames in %.1f s (%.1f frames/s), %s, audio %s, %.1f MB' % (r['exportFrames'], r['exportSeconds'], r['exportFramesPerSecond'], r['exportCodec'], r['exportAudio'], r['exportBytes']/2**20))
 elif r.get('exportError'): print('  export failed:', r['exportError'])

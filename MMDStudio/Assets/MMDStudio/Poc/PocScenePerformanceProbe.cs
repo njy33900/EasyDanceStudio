@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using UnityEngine;
 using UnityEngine.Profiling;
+using UnityEngine.UIElements;
 using Debug = UnityEngine.Debug;
 
 namespace MmdStudio.Poc
@@ -24,6 +25,10 @@ namespace MmdStudio.Poc
             public int gen0Collections;
             public long managedBytesStart, managedBytesEnd;
             public bool meetsThirtyFpsTarget;
+            // v0.61: passes that feed viewport input every frame (0 calls otherwise). The time is
+            // the input handling itself (routing, camera update, surface query for the wheel).
+            public int inputCalls, cameraMovedFrames;
+            public float inputMedianMs, inputP95Ms, inputWorstMs;
         }
         // H2a-02: cost of one 1920x1080 render of the main camera, independent of the display's
         // frame cap (the windowed Player may be held at the refresh rate even with vsync off).
@@ -119,6 +124,50 @@ namespace MmdStudio.Poc
             ui.Scene.Loop = true; ui.Scene.Speed = 1; ui.Scene.AutomaticClock = true;
             ui.Scene.Seek(Math.Min(30, ui.Scene.Duration * .2)); ui.Scene.Playing = true;
             yield return Measure("effects_on_shadows_medium", 3, 20, passes);
+            // v0.61: camera input during playback (same reference look). No selection, so no gizmo
+            // under the pointer; the pointer stays in the middle of the viewport.
+            ui.SelectTarget(MmdSceneWorkspace.InspectorTarget.Light);
+            Activate(ui, "FrameAll");
+            var centre = new Vector2(Screen.width * .5f, Screen.height * .5f);
+            var pointer = centre; var phase = 0f;
+            void Drag(bool left, bool right, Vector2 next)
+            {
+                ui.ProcessViewportInput(next, next - pointer, 0, right, false, false, left);
+                pointer = next;
+            }
+            // Left drag: a slow circle (orbit), pressed for the whole pass.
+            Drag(true, false, centre);
+            yield return Measure("playback_camera_orbit_left_drag", 1, 6, passes, () =>
+            {
+                phase += Time.unscaledDeltaTime * 2;
+                Drag(true, false, centre + new Vector2(Mathf.Sin(phase) * 160, Mathf.Sin(phase * 2) * 40));
+            }, ui);
+            Drag(false, false, pointer);
+            // Right drag: up and down (dolly between closer and farther).
+            phase = 0; Drag(false, true, centre);
+            yield return Measure("playback_camera_dolly_right_drag", 1, 6, passes, () =>
+            {
+                phase += Time.unscaledDeltaTime * 2;
+                Drag(false, true, centre + new Vector2(0, Mathf.Sin(phase) * 120));
+            }, ui);
+            Drag(false, false, pointer);
+            Activate(ui, "FrameAll");
+            // Wheel over the dancing first character: one notch in, one out, every frame (each
+            // notch queries the surface under the cursor on the current pose).
+            var notch = 1f; int wheelHits = 0, wheelCalls = 0;
+            yield return Measure("playback_camera_wheel_to_surface", 1, 6, passes, () =>
+            {
+                var body = BodyScreen(ui.Scene.Objects.First(o => o.Kind == MmdSceneService.ObjectKind.Character));
+                ui.ProcessViewportInput(body, Vector2.zero, notch, false, false, false);
+                wheelCalls++; if (ui.LastZoomHitSurface) wheelHits++;
+                notch = -notch;
+            }, ui);
+            notes.Add("v0.61 wheel passes hit a surface on " + wheelHits + " of " + wheelCalls + " notches.");
+            Activate(ui, "FrameAll");
+            // v0.61: screen correction on every object (each material slot carries a property block).
+            foreach (var item in ui.Scene.Objects) ui.Scene.SetCorrection(item.Id, Corrected(item));
+            yield return Measure("effects_on_screen_corrections_all_objects", 2, 10, passes);
+            foreach (var item in ui.Scene.Objects) ui.Scene.SetCorrection(item.Id, new ColorCorrectionData());
             // H2a-02 / decision 9: DOF (bokeh, on the first character) + SSAO + vignette on top of the reference look.
             var rich = ui.Graphics.Settings; rich.dofEnabled = true; rich.dofTarget = ui.Scene.Objects.First().Id; rich.ssaoEnabled = true; rich.vignetteEnabled = true;
             ui.Graphics.Apply(rich);
@@ -135,6 +184,10 @@ namespace MmdStudio.Poc
             {
                 costs.Clear();
                 ui.Graphics.Apply(reference); costs.Add(MeasureRender("reference_bloom_tonemap_shadows_medium"));
+                // v0.61: the same frame with a screen correction on every object.
+                foreach (var item in ui.Scene.Objects) ui.Scene.SetCorrection(item.Id, Corrected(item));
+                costs.Add(MeasureRender("reference_with_screen_corrections_all_objects"));
+                foreach (var item in ui.Scene.Objects) ui.Scene.SetCorrection(item.Id, new ColorCorrectionData());
                 rich.effectQuality = MmdEffectQuality.Medium; ui.Graphics.Apply(rich); costs.Add(MeasureRender("plus_dof_ssao_vignette"));
                 rich.effectQuality = MmdEffectQuality.High; ui.Graphics.Apply(rich); costs.Add(MeasureRender("plus_dof_ssao_vignette_high"));
                 rich.effectQuality = MmdEffectQuality.Low; ui.Graphics.Apply(rich); costs.Add(MeasureRender("plus_dof_ssao_vignette_low"));
@@ -214,10 +267,45 @@ namespace MmdStudio.Poc
             }
         }
 
-        private static IEnumerator Measure(string name, float warmupSeconds, float seconds, List<Pass> passes)
+        // v0.61 helpers: a toolbar button press, the first character's upper body on screen, and
+        // a typical correction (object colour/brightness, plus gloss on the first PMX material).
+        private static void Activate(MmdSceneWorkspace ui, string name)
         {
+            var button = ui.Root.Q<UnityEngine.UIElements.Button>(name);
+            if (button == null || !button.enabledInHierarchy) throw new InvalidOperationException("UI button unavailable: " + name);
+            button.Focus();
+            using (var evt = UnityEngine.UIElements.NavigationSubmitEvent.GetPooled()) button.SendEvent(evt);
+        }
+        private static Vector2 BodyScreen(MmdSceneService.SceneObject item)
+        {
+            var bone = item.Model.root.GetComponentsInChildren<Transform>().FirstOrDefault(part => part.name == "上半身");
+            Vector3 world;
+            if (bone != null) world = bone.position; else { MmdSceneWorkspace.TryBounds(new[] { item }, out var bounds); world = bounds.center; }
+            var point = Camera.main.WorldToScreenPoint(world);
+            return new Vector2(point.x, point.y);
+        }
+        private static ColorCorrectionData Corrected(MmdSceneService.SceneObject item)
+        {
+            var data = new ColorCorrectionData { tint = new Color(1, .95f, .9f), brightness = 1.05f };
+            data.materials.Add(new MaterialCorrectionData { index = 0, name = item.StylerOrCreate.PmxName(0), tint = new Color(1, .9f, .9f), gloss = .5f });
+            return data;
+        }
+
+        private static IEnumerator Measure(string name, float warmupSeconds, float seconds, List<Pass> passes, Action perFrame = null, MmdSceneWorkspace ui = null)
+        {
+            var input = new List<float>(4096); var moved = 0;
+            var inputClock = new Stopwatch();
+            void Feed()
+            {
+                if (perFrame == null) return;
+                var camera = Camera.main; var before = (camera.transform.position, camera.transform.rotation);
+                inputClock.Restart(); perFrame(); inputClock.Stop();
+                input.Add((float)inputClock.Elapsed.TotalMilliseconds);
+                if ((camera.transform.position, camera.transform.rotation) != before) moved++;
+            }
             var warm = Time.realtimeSinceStartup;
-            while (Time.realtimeSinceStartup - warm < warmupSeconds) yield return null;
+            while (Time.realtimeSinceStartup - warm < warmupSeconds) { yield return null; Feed(); }
+            input.Clear(); moved = 0;
             var frames = new List<float>(4096);
             var gen0 = GC.CollectionCount(0);
             var managedStart = GC.GetTotalMemory(false);
@@ -226,6 +314,7 @@ namespace MmdStudio.Poc
             {
                 yield return null;
                 var now = Time.realtimeSinceStartup; frames.Add((now - last) * 1000f); last = now;
+                Feed();
             }
             var sorted = frames.OrderBy(value => value).ToArray();
             float Percentile(float p) => sorted[Mathf.Clamp(Mathf.CeilToInt(p * sorted.Length) - 1, 0, sorted.Length - 1)];
@@ -239,8 +328,17 @@ namespace MmdStudio.Poc
                 managedBytesStart = managedStart, managedBytesEnd = GC.GetTotalMemory(false),
             };
             pass.meetsThirtyFpsTarget = pass.averageFps >= 30;
+            if (input.Count > 0)
+            {
+                var inputSorted = input.OrderBy(value => value).ToArray();
+                pass.inputCalls = input.Count; pass.cameraMovedFrames = moved;
+                pass.inputMedianMs = inputSorted[inputSorted.Length / 2];
+                pass.inputP95Ms = inputSorted[Mathf.Clamp(Mathf.CeilToInt(.95f * inputSorted.Length) - 1, 0, inputSorted.Length - 1)];
+                pass.inputWorstMs = inputSorted.Last();
+            }
             passes.Add(pass);
-            Debug.Log("[perf-probe] " + name + " avg " + pass.averageFps.ToString("F1") + " fps, p95 " + pass.p95FrameMs.ToString("F2") + " ms, worst " + pass.worstFrameMs.ToString("F1") + " ms");
+            Debug.Log("[perf-probe] " + name + " avg " + pass.averageFps.ToString("F1") + " fps, p95 " + pass.p95FrameMs.ToString("F2") + " ms, worst " + pass.worstFrameMs.ToString("F1") + " ms" +
+                (input.Count > 0 ? ", input median " + pass.inputMedianMs.ToString("F3") + " ms worst " + pass.inputWorstMs.ToString("F2") + " ms, camera moved " + moved + "/" + input.Count : ""));
         }
 
         private static void Finish(string path, Report report, List<string> notes, string error)
