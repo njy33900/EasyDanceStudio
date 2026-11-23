@@ -67,6 +67,8 @@ namespace MmdStudio.Poc
         public PhysicsData physics = new PhysicsData();
         // H2b-01 (additive in schema 2): material style override.
         public MaterialStyleData material = new MaterialStyleData();
+        // v0.61 (additive in schema 2): screen correction (object and per-PMX-material).
+        public ColorCorrectionData correction = new ColorCorrectionData();
     }
 
     [Serializable]
@@ -120,6 +122,7 @@ namespace MmdStudio.Poc
     {
         public Vector3 pivot = new Vector3(0, 1, 0);
         public float yaw = MmdViewportCamera.DefaultYaw, pitch = MmdViewportCamera.DefaultPitch, distance = 4;
+        public float roll; // v0.61 (additive in schema 2): screen tilt handed over from a camera VMD
     }
 
     [Serializable]
@@ -225,9 +228,12 @@ namespace MmdStudio.Poc
                 catch (ArgumentException ex) { throw new InvalidDataException("재질 스타일 설정이 올바르지 않습니다: " + ex.Message, ex); }
                 if (item.material.style == MaterialStyleData.Pbr && item.type != SceneObjectData.StageType)
                     throw new InvalidDataException("PBR 재질은 배경에만 쓸 수 있습니다.");
+                if (item.correction == null) item.correction = new ColorCorrectionData();
+                try { item.correction.Validate(); }
+                catch (ArgumentException ex) { throw new InvalidDataException("화면 보정 설정이 올바르지 않습니다: " + ex.Message, ex); }
             }
             if (scene.view == null || !Finite(scene.view.pivot.x) || !Finite(scene.view.pivot.y) || !Finite(scene.view.pivot.z) ||
-                !Finite(scene.view.yaw) || !Finite(scene.view.pitch) || !Finite(scene.view.distance)) throw new InvalidDataException("시점 값이 올바르지 않습니다.");
+                !Finite(scene.view.yaw) || !Finite(scene.view.pitch) || !Finite(scene.view.distance) || !Finite(scene.view.roll)) throw new InvalidDataException("시점 값이 올바르지 않습니다.");
             if (scene.timeline == null || double.IsNaN(scene.timeline.timeSeconds) || double.IsInfinity(scene.timeline.timeSeconds) || scene.timeline.timeSeconds < 0 ||
                 double.IsNaN(scene.timeline.speed) || scene.timeline.speed < .5 || scene.timeline.speed > 2) throw new InvalidDataException("재생 설정이 올바르지 않습니다.");
             if (scene.graphics == null) throw new InvalidDataException("그래픽 설정이 없습니다.");

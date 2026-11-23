@@ -69,7 +69,8 @@ namespace MmdStudio.Poc
         {
             this.model = model;
             foreach (var mesh in model.meshes)
-                if (mesh.renderer != null) slots.Add(new Slot { Renderer = mesh.renderer, Originals = mesh.renderer.sharedMaterials, PmxIndices = mesh.materialIndices });
+                if (mesh.renderer != null) slots.Add(new Slot { Renderer = mesh.renderer, Originals = mesh.renderer.sharedMaterials, PmxIndices = mesh.materialIndices ?? new int[0] });
+            foreach (var slot in slots) foreach (var index in slot.PmxIndices) if (index >= 0) drawn.Add(index);
             MaterialCount = slots.Sum(s => s.Originals.Length);
             var pmx = model.model?.materials ?? new PMXMaterial[0];
             foreach (var slot in slots)
@@ -113,6 +114,123 @@ namespace MmdStudio.Poc
                 slot.Renderer.sharedMaterials = set;
             }
             Current = data.style;
+            RefreshCorrection(); // the corrected colour starts from the new material's own colour
+        }
+
+        // ----- v0.61 screen correction (see MmdMaterialCorrection.cs) -----
+        private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor"), GlossId = Shader.PropertyToID("_Gloss"), SmoothnessId = Shader.PropertyToID("_Smoothness");
+        private readonly HashSet<int> drawn = new HashSet<int>();
+        private ColorCorrectionData correction = new ColorCorrectionData();
+        private bool correctionShown = true;
+        private MaterialPropertyBlock block;
+        internal CorrectionResolution Resolution { get; private set; } = new CorrectionResolution();
+        // Material slots that currently carry a correction block (0 when nothing is corrected or shown).
+        internal int CorrectedSlots { get; private set; }
+        public int PmxMaterialCount => model.model?.materials?.Length ?? 0;
+        // The material's name as written in the PMX (Japanese name; the importer's ASCII name when empty).
+        public string PmxName(int index)
+        {
+            var pmx = model.model?.materials;
+            if (pmx == null || index < 0 || index >= pmx.Length) return "";
+            var name = pmx[index].originalName.ToString();
+            return string.IsNullOrEmpty(name) ? pmx[index].renamedName.ToString() : name;
+        }
+        public bool PmxDrawn(int index) => drawn.Contains(index);
+        // PMX material of a renderer's sub-mesh (picking), -1 when it maps to none.
+        public int PmxIndexOf(Renderer renderer, int subMesh)
+        {
+            foreach (var slot in slots)
+                if (slot.Renderer == renderer) return subMesh >= 0 && subMesh < slot.PmxIndices.Length ? slot.PmxIndices[subMesh] : -1;
+            return -1;
+        }
+        // What this style can take: every style has a colour; gloss needs a lit style.
+        public static bool GlossSupported(string style) => style == MaterialStyleData.Toon || style == MaterialStyleData.Pbr;
+
+        public void ApplyCorrection(ColorCorrectionData data, bool shown)
+        {
+            if (data == null) throw new ArgumentNullException(nameof(data));
+            correction = data.Clone(); correctionShown = shown;
+            RefreshCorrection();
+        }
+        public void ShowCorrection(bool shown)
+        {
+            if (correctionShown == shown) return;
+            correctionShown = shown; RefreshCorrection();
+        }
+
+        // Matches stored entries to this model's PMX materials. An entry applies when the material
+        // at its index still has its name, or (the model was edited) when exactly one material has
+        // that name. Otherwise it is kept but applied to nothing, with the reason.
+        internal static CorrectionResolution ResolveCorrections(ColorCorrectionData data, int count, Func<int, string> nameOf)
+        {
+            var result = new CorrectionResolution();
+            var names = new Dictionary<string, List<int>>();
+            for (var i = 0; i < count; i++)
+            {
+                var name = nameOf(i);
+                if (!names.TryGetValue(name, out var list)) names[name] = list = new List<int>();
+                list.Add(i);
+            }
+            // Exact matches (same index, same name) first, so they win over name-only matches.
+            var pending = new List<MaterialCorrectionData>();
+            foreach (var entry in data.materials)
+            {
+                if (entry.index >= 0 && entry.index < count && nameOf(entry.index) == entry.name && !result.ByPmx.ContainsKey(entry.index)) result.ByPmx[entry.index] = entry;
+                else pending.Add(entry);
+            }
+            foreach (var entry in pending)
+            {
+                if (!names.TryGetValue(entry.name, out var same) || same.Count == 0) { result.Problems[entry] = "모델에 이 이름의 재질이 없습니다(모델이 바뀌었을 수 있음)"; continue; }
+                if (same.Count > 1) { result.Problems[entry] = "같은 이름의 재질이 " + same.Count + "개이고 번호도 달라 어느 재질인지 알 수 없습니다"; continue; }
+                if (result.ByPmx.ContainsKey(same[0])) { result.Problems[entry] = "다른 보정 항목과 같은 재질을 가리킵니다"; continue; }
+                result.ByPmx[same[0]] = entry; result.Moved[entry] = same[0];
+            }
+            return result;
+        }
+
+        private void RefreshCorrection()
+        {
+            Resolution = ResolveCorrections(correction, PmxMaterialCount, PmxName);
+            CorrectedSlots = 0;
+            if (block == null) block = new MaterialPropertyBlock();
+            foreach (var slot in slots)
+            {
+                if (slot.Renderer == null) continue;
+                var current = slot.Renderer.sharedMaterials;
+                for (var i = 0; i < current.Length; i++)
+                {
+                    var material = current[i];
+                    var pmx = i < slot.PmxIndices.Length ? slot.PmxIndices[i] : -1;
+                    MaterialCorrectionData entry = null;
+                    if (pmx >= 0) Resolution.ByPmx.TryGetValue(pmx, out entry);
+                    var objectPart = !correction.ObjectNeutral; var materialPart = entry != null && !entry.Neutral;
+                    // Materials not linked to a PMX material are never corrected (they cannot be identified).
+                    if (!correctionShown || material == null || pmx < 0 || (!objectPart && !materialPart)) { slot.Renderer.SetPropertyBlock(null, i); continue; }
+                    block.Clear();
+                    if (material.HasProperty(BaseColorId))
+                    {
+                        var colour = material.GetColor(BaseColorId);
+                        var k = correction.brightness * (entry?.brightness ?? 1);
+                        colour.r *= correction.tint.r * (entry?.tint.r ?? 1) * k;
+                        colour.g *= correction.tint.g * (entry?.tint.g ?? 1) * k;
+                        colour.b *= correction.tint.b * (entry?.tint.b ?? 1) * k;
+                        block.SetColor(BaseColorId, colour);
+                    }
+                    if (entry != null && entry.gloss > 0)
+                    {
+                        if (material.shader == ToonShader) block.SetFloat(GlossId, entry.gloss);
+                        else if (material.shader == PbrShader) block.SetFloat(SmoothnessId, Mathf.Lerp(material.GetFloat(SmoothnessId), 1, entry.gloss));
+                    }
+                    if (block.isEmpty) { slot.Renderer.SetPropertyBlock(null, i); continue; }
+                    slot.Renderer.SetPropertyBlock(block, i); CorrectedSlots++;
+                }
+            }
+        }
+        private void ClearCorrectionBlocks()
+        {
+            foreach (var slot in slots)
+                if (slot.Renderer != null) for (var i = 0; i < slot.Renderer.sharedMaterials.Length; i++) slot.Renderer.SetPropertyBlock(null, i);
+            CorrectedSlots = 0;
         }
 
         private PMXMaterial? Pmx(Slot slot, int i)
@@ -160,6 +278,8 @@ namespace MmdStudio.Poc
                         material.SetColor("_ShadowTint", aDarker ? a : b); material.SetColor("_LitTint", aDarker ? b : a);
                     }
                     material.SetColor("_OutlineColor", p.edgeColor);
+                    // v0.61 gloss: the highlight size follows the PMX specular power (MMD's 反射強度).
+                    material.SetFloat("_GlossPower", p.specularStrength > 0 ? Mathf.Clamp(p.specularStrength, 8, 128) : 32);
                 }
                 set[i] = material;
             }
@@ -197,6 +317,7 @@ namespace MmdStudio.Poc
         public void Dispose()
         {
             if (quitting) { created.Clear(); return; }
+            ClearCorrectionBlocks();
             foreach (var slot in slots) if (slot.Renderer != null) slot.Renderer.sharedMaterials = slot.Originals;
             foreach (var material in created) if (material != null) UnityEngine.Object.Destroy(material);
             created.Clear();

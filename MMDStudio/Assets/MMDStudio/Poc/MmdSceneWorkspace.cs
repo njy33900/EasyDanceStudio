@@ -118,10 +118,11 @@ namespace MmdStudio.Poc
             emptyState.Add(new MmdIcon(MmdIconKind.Cube, 40, new Color(.55f, .55f, .6f)));
             Text(emptyState, "3D 뷰포트", "eds-empty-title").pickingMode = PickingMode.Ignore;
             Text(emptyState, "캐릭터와 배경을 추가해 배치하고 재생하세요", "eds-empty-sub").pickingMode = PickingMode.Ignore;
-            viewportHint = Text(viewport, "좌클릭 선택 · 우클릭 회전 · 휠클릭 이동 · 휠 확대 · W/E/R 기즈모 · F 맞춤 · Space 재생 · Delete 삭제 · H 집중 보기", "eds-viewport-hint");
+            viewportHint = Text(viewport, "클릭 선택 · 좌드래그 회전 · 우드래그 확대/축소 · 휠클릭(Shift+우드래그) 이동 · 휠 커서 쪽 확대 · W/E/R 기즈모 · F 맞춤 · Space 재생 · Delete 삭제 · H 집중 보기", "eds-viewport-hint");
             viewportHint.name = "ViewportHint"; viewportHint.pickingMode = PickingMode.Ignore;
             BuildGizmoUi(viewport);
             BuildOutputGuide(viewport);
+            BuildCompareChip(viewport);
             body.Insert(0, viewportWrap); // 3D overlays paint behind the floating cards.
 
             // ----- Inspector: selection header, then stacked sections -----
@@ -179,6 +180,7 @@ namespace MmdStudio.Poc
             materialSection = Section(content, "MaterialSection", "재질");
             materialInfo = Text(materialSection, "", "eds-section-text"); materialInfo.name = "MaterialInfo";
             BuildMaterialControls(materialSection);
+            BuildCorrectionSection(content);
 
             BuildLookSection(content);
             BuildAudioSection(content);
@@ -358,6 +360,7 @@ namespace MmdStudio.Poc
             RefreshOutputGuide();
             RefreshLook();
             RefreshMaterial();
+            RefreshCorrectionUi();
             RefreshCameraMotion();
             RefreshAutoCamera();
             RefreshGizmo();

@@ -4,6 +4,8 @@
 // Material.SetShaderPassEnabled). Base colour and transparency follow the original PMX material.
 // The light term is normalised to the app's default light intensity (2), so the default light
 // shows the texture's own colours on the lit side.
+// v0.61: _Gloss adds a stepped specular highlight on the lit side (0 = none, the default, so
+// existing looks are unchanged); its size follows the PMX specular power (_GlossPower).
 Shader "EasyDanceStudio/Toon"
 {
     Properties
@@ -18,6 +20,8 @@ Shader "EasyDanceStudio/Toon"
         _RimStrength ("Rim Strength", Range(0, 1)) = 0.3
         _RimPower ("Rim Power", Range(0.5, 8)) = 4
         _LightScale ("Light Scale", Float) = 0.5
+        _Gloss ("Gloss", Range(0, 1)) = 0
+        _GlossPower ("Gloss Power", Range(4, 256)) = 32
         _OutlineColor ("Outline Color", Color) = (0, 0, 0, 1)
         _OutlineWidth ("Outline Width", Float) = 0.0025
         [Enum(UnityEngine.Rendering.CullMode)] _Cull ("Cull", Float) = 2
@@ -44,6 +48,8 @@ Shader "EasyDanceStudio/Toon"
             half _RimStrength;
             half _RimPower;
             half _LightScale;
+            half _Gloss;
+            half _GlossPower;
             half4 _OutlineColor;
             float _OutlineWidth;
             half _Surface;
@@ -105,7 +111,9 @@ Shader "EasyDanceStudio/Toon"
                 half3 lightColour = min(light.color * _LightScale, 1.5h);
                 float3 view = normalize(GetWorldSpaceViewDir(input.positionWS));
                 half rim = pow(saturate(1 - dot(normal, view)), _RimPower) * _RimStrength * saturate(lit + 0.25h);
-                half3 colour = base.rgb * shade * lightColour + rim * lightColour;
+                half specular = pow(saturate(dot(normal, normalize(light.direction + view))), _GlossPower);
+                half highlight = smoothstep(0.35h, 0.65h, specular) * _Gloss * lit;
+                half3 colour = base.rgb * shade * lightColour + (rim + highlight) * lightColour;
                 colour = MixFog(colour, input.fogFactor);
                 return half4(colour, _Surface > 0.5h ? base.a : 1);
             }

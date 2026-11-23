@@ -58,14 +58,16 @@ namespace MmdStudio.Poc
             public bool Busy => false;
             public bool PointerInViewport(Vector2 screen) => InViewport;
             public void ReleaseFocus() { }
-            public bool BeginGizmoDrag(Vector2 screen) => false;
+            public bool GizmoUnderPointer;
+            public bool BeginGizmoDrag(Vector2 screen) { if (GizmoUnderPointer) Log.Add("gizmoBegin"); return GizmoUnderPointer; }
             public void UpdateGizmoDrag(Vector2 screen) => Log.Add("gizmoDrag");
             public void EndGizmoDrag() => Log.Add("gizmoEnd");
             public void UpdateGizmoHover(Vector2 screen, bool overViewport) { }
             public void ClickAt(Vector2 screen) => Log.Add("click " + screen);
-            public void Orbit(Vector2 delta) => Log.Add("orbit");
+            public void Orbit(Vector2 delta) => Log.Add("orbit " + delta.x.ToString("0") + "," + delta.y.ToString("0"));
             public void Pan(Vector2 delta) => Log.Add("pan");
-            public void Zoom(float notches) => Log.Add("zoom");
+            public void Dolly(float pixels) => Log.Add("dolly " + pixels.ToString("0"));
+            public void Zoom(float notches, Vector2 screen) => Log.Add("zoom");
             public void ApplyView() { }
             public void FrameSelection() => Log.Add("frame");
             public void TogglePlay() => Log.Add("play");
@@ -266,6 +268,7 @@ namespace MmdStudio.Poc
                 GizmoChecks(ui, a);
                 GraphicsChecks(ui);
                 MaterialChecks(ui, a, b, stage, reportDirectory);
+                CorrectionChecks(ui, a, b, stage, reportDirectory);
             }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
 
@@ -345,9 +348,7 @@ namespace MmdStudio.Poc
                     ui.PointerInViewport(new Vector2(Screen.width - 70, Screen.height * .5f)) &&
                     ui.PointerInViewport(new Vector2(Screen.width * .5f, Screen.height - 38)));
                 var before = ui.View.Yaw;
-                Frame(ui, new Vector2(Screen.width * .5f, Screen.height * .5f), Vector2.zero, orbit: true);
-                Frame(ui, new Vector2(Screen.width * .5f + 30, Screen.height * .5f), new Vector2(30, 0), orbit: true);
-                Frame(ui, new Vector2(Screen.width * .5f + 30, Screen.height * .5f), Vector2.zero);
+                LeftDrag(ui, new Vector2(Screen.width * .5f, Screen.height * .5f), new Vector2(Screen.width * .5f + 30, Screen.height * .5f));
                 Check("focus_view_orbit_still_works", !Near(ui.View.Yaw, before));
                 ScreenCapture.CaptureScreenshot(Path.Combine(Path.GetDirectoryName(path), "scene-ui-focus.png"));
             }
@@ -625,30 +626,68 @@ namespace MmdStudio.Poc
             try
             {
                 var fake = new FakeViewportTarget(); var router = new ViewportInputRouter();
-                ViewportInputFrame F(Vector2 at, bool left = false, bool orbit = false, bool cancel = false, bool undo = false) =>
-                    new ViewportInputFrame { Screen = at, Delta = new Vector2(3, 0), LeftHeld = left, OrbitHeld = orbit, CancelKey = cancel, UndoKey = undo };
-                // A click within the slop picks once.
-                router.Route(F(new Vector2(100, 100), left: true), fake); router.Route(F(new Vector2(103, 102)), fake);
-                var clicked = fake.Log.Count(entry => entry.StartsWith("click")) == 1;
-                // A left drag beyond the slop does not pick.
-                fake.Log.Clear();
-                router.Route(F(new Vector2(100, 100), left: true), fake); router.Route(F(new Vector2(120, 100), left: true), fake); router.Route(F(new Vector2(120, 100)), fake);
-                var dragNoPick = !fake.Log.Any(entry => entry.StartsWith("click"));
-                // Right drag orbits after the press frame; a dialog blocks everything but Esc.
-                fake.Log.Clear();
-                router.Route(F(new Vector2(100, 100), orbit: true), fake); router.Route(F(new Vector2(103, 100), orbit: true), fake);
-                var orbited = fake.Log.Count(entry => entry == "orbit") == 1;
-                router.Route(F(new Vector2(100, 100)), fake);
-                fake.Log.Clear(); fake.DialogOpen = true;
-                router.Route(F(new Vector2(100, 100), undo: true), fake); router.Route(F(new Vector2(100, 100), cancel: true), fake);
-                var dialogBlocks = fake.Log.SequenceEqual(new[] { "cancelDialog" });
+                var last = Vector2.zero;
+                // One frame at `at`; the delta is the movement since the previous frame.
+                ViewportInputFrame F(Vector2 at, bool left = false, bool right = false, bool pan = false, bool cancel = false, bool undo = false, bool focusLost = false)
+                {
+                    var frame = new ViewportInputFrame { Screen = at, Delta = at - last, LeftHeld = left, DollyHeld = right, PanHeld = pan, CancelKey = cancel, UndoKey = undo, FocusLost = focusLost };
+                    last = at; return frame;
+                }
+                void Run(params ViewportInputFrame[] frames) { foreach (var frame in frames) router.Route(frame, fake); }
+                var p = new Vector2(100, 100);
+                // A click within the slop picks once and moves nothing.
+                last = p; Run(F(p, left: true), F(p + new Vector2(3, 2), left: true), F(p + new Vector2(3, 2)));
+                var clicked = fake.Log.Count(entry => entry.StartsWith("click")) == 1 && !fake.Log.Any(entry => entry.StartsWith("orbit"));
+                // A left drag beyond the slop orbits (catching up the held-back 6 px), and its release does not pick.
+                fake.Log.Clear(); last = p;
+                Run(F(p, left: true), F(p + new Vector2(2, 0), left: true), F(p + new Vector2(6, 0), left: true), F(p + new Vector2(9, 0), left: true), F(p + new Vector2(9, 0)));
+                var leftOrbit = fake.Log.SequenceEqual(new[] { "orbit 6,0", "orbit 3,0" });
+                // Right drag dollies on its vertical movement only (horizontal is ignored); Shift+right/middle pans.
+                fake.Log.Clear(); last = p;
+                Run(F(p, right: true), F(p + new Vector2(20, 0), right: true), F(p + new Vector2(20, 15), right: true), F(p + new Vector2(20, 15)));
+                var dolly = fake.Log.SequenceEqual(new[] { "dolly 15" });
+                fake.Log.Clear(); last = p;
+                Run(F(p, pan: true), F(p + new Vector2(4, 4), pan: true), F(p + new Vector2(4, 4)));
+                var panned = fake.Log.SequenceEqual(new[] { "pan" });
+                // Press and release without movement: no camera call at all (a camera VMD stays).
+                fake.Log.Clear(); last = p;
+                Run(F(p, right: true), F(p, right: true), F(p), F(p, pan: true), F(p, pan: true), F(p));
+                var still = fake.Log.Count == 0;
+                // A left press on a gizmo handle drags the gizmo, never the camera.
+                fake.Log.Clear(); last = p; fake.GizmoUnderPointer = true;
+                Run(F(p, left: true), F(p + new Vector2(20, 0), left: true), F(p + new Vector2(20, 0)));
+                var gizmo = fake.Log.SequenceEqual(new[] { "gizmoBegin", "gizmoDrag", "gizmoEnd" });
+                fake.GizmoUnderPointer = false;
+                // Only one button drives: a right press during a left orbit is ignored.
+                fake.Log.Clear(); last = p;
+                Run(F(p, left: true), F(p + new Vector2(10, 0), left: true), F(p + new Vector2(10, 10), left: true, right: true), F(p + new Vector2(10, 10)));
+                var oneButton = !fake.Log.Any(entry => entry.StartsWith("dolly"));
+                // Focus loss ends a drag; the still-held button does not resume it on return.
+                fake.Log.Clear(); last = p;
+                Run(F(p, left: true), F(p + new Vector2(10, 0), left: true), F(p + new Vector2(20, 0), left: true, focusLost: true), F(p + new Vector2(30, 0), left: true), F(p + new Vector2(30, 0)));
+                var focusEnds = fake.Log.SequenceEqual(new[] { "orbit 10,0" });
+                // A started drag continues over panels; a press over a panel starts nothing.
+                fake.Log.Clear(); last = p;
+                router.Route(F(p, left: true), fake); fake.InViewport = false;
+                Run(F(p + new Vector2(10, 0), left: true), F(p + new Vector2(14, 0), left: true), F(p + new Vector2(14, 0)), F(p + new Vector2(14, 0), right: true), F(p + new Vector2(14, 20), right: true), F(p + new Vector2(14, 20)));
+                var acrossPanels = fake.Log.SequenceEqual(new[] { "orbit 10,0", "orbit 4,0" });
+                fake.InViewport = true;
+                // A dialog blocks everything but Esc and ends a drag.
+                fake.Log.Clear(); last = p;
+                router.Route(F(p, left: true), fake); router.Route(F(p + new Vector2(10, 0), left: true), fake);
+                fake.DialogOpen = true;
+                Run(F(p + new Vector2(20, 0), left: true, undo: true), F(p + new Vector2(20, 0), left: true, cancel: true));
+                fake.DialogOpen = false;
+                Run(F(p + new Vector2(30, 0), left: true), F(p + new Vector2(30, 0)));
+                var dialogBlocks = fake.Log.SequenceEqual(new[] { "orbit 10,0", "cancelDialog" });
                 // Outside the viewport a press starts nothing; keys still work.
-                fake.Log.Clear(); fake.DialogOpen = false; fake.InViewport = false;
-                router.Route(F(new Vector2(5, 5), left: true, undo: true), fake); router.Route(F(new Vector2(5, 5)), fake);
+                fake.Log.Clear(); fake.InViewport = false; last = new Vector2(5, 5);
+                Run(F(new Vector2(5, 5), left: true, undo: true), F(new Vector2(5, 5)));
                 var outside = fake.Log.Contains("undo") && !fake.Log.Any(entry => entry.StartsWith("click"));
-                Check("input_router_rules_without_ui" + (clicked && dragNoPick && orbited && dialogBlocks && outside ? "" :
-                    " [click=" + clicked + " drag=" + dragNoPick + " orbit=" + orbited + " dialog=" + dialogBlocks + " outside=" + outside + "]"),
-                    clicked && dragNoPick && orbited && dialogBlocks && outside);
+                fake.InViewport = true;
+                var all = clicked && leftOrbit && dolly && panned && still && gizmo && oneButton && focusEnds && acrossPanels && dialogBlocks && outside;
+                Check("input_router_rules_without_ui" + (all ? "" : " [click=" + clicked + " leftOrbit=" + leftOrbit + " dolly=" + dolly + " pan=" + panned + " still=" + still +
+                    " gizmo=" + gizmo + " oneButton=" + oneButton + " focus=" + focusEnds + " panels=" + acrossPanels + " dialog=" + dialogBlocks + " outside=" + outside + "]"), all);
             }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
 
@@ -999,6 +1038,9 @@ namespace MmdStudio.Poc
             string outputError = null;
             yield return OutputChecks(ui, path, sceneFile, error => outputError = error);
             if (outputError != null) { Finish(path, report, outputError); yield break; }
+            string correctionError = null;
+            yield return CorrectionOutputChecks(ui, path, error => correctionError = error);
+            if (correctionError != null) { Finish(path, report, correctionError); yield break; }
             string autoError = null;
             yield return AutoCameraChecks(ui, path, error => autoError = error);
             if (autoError != null) { Finish(path, report, autoError); yield break; }
@@ -1259,7 +1301,8 @@ namespace MmdStudio.Poc
                     CameraKey(0, new Vector3(0, 10, 0), Vector3.zero, -30, 30),
                     CameraKey(30, new Vector3(10, 20, -5), new Vector3(.2f, 1, 0), -20, 45, y: easeIn),
                     CameraKey(31, new Vector3(0, 5, 0), new Vector3(0, Mathf.PI, 0), -10, 30),          // hard cut
-                    CameraKey(60, new Vector3(0, 5, 0), new Vector3(0, Mathf.PI, 0), -15, 30, orthographic: true),
+                    // v0.61: a screen tilt (roll) toward the last key, handed over to the manual view.
+                    CameraKey(60, new Vector3(0, 5, 0), new Vector3(0, Mathf.PI, .3f), -15, 30, orthographic: true),
                 }, lightKeys: 2);
                 loaded = MmdCameraMotion.Load(fixture);
                 var start = loaded.Evaluate(0);
@@ -1354,21 +1397,44 @@ namespace MmdStudio.Poc
                     ui.Root.Q<Label>("CameraMotionInfo").text.Contains("직교") && ui.Scene.Duration >= motion.DurationSeconds);
                 ui.Scene.Playing = true; ui.Scene.Advance(.25); ui.Scene.Playing = false; ui.ApplyCameraMotion();
                 var played = SamePose(camera, motion.Evaluate(ui.Scene.Seconds)) && Math.Abs(ui.Scene.Seconds - (1 + .25 * ui.Scene.Speed)) < 1e-9; // this scene plays at 2x
-                // Manual navigation releases the motion and continues from its pose.
-                beforeRelease = camera.transform.position;
-                var centre = new Vector2(Screen.width * .5f, Screen.height * .5f);
-                Frame(ui, centre, Vector2.zero, orbit: true);
-                var continuous = (camera.transform.position - beforeRelease).magnitude < 1e-3f;
-                Frame(ui, centre, new Vector2(30, 0), orbit: true); Frame(ui, centre, Vector2.zero);
-                var released = !ui.CameraFollowing && ui.Scene.CameraMotion == motion && !ui.Root.Q<Toggle>("CameraFollow").value &&
-                    Math.Abs(camera.fieldOfView - ui.Graphics.Settings.fieldOfView) < 1e-4f;
-                var manual = camera.transform.position;
+                // v0.61: only real movement releases the motion. Pressing and releasing (a click that
+                // selects or clears), a right press, or a sideways right drag (no dolly) keep following.
                 ui.Scene.Seek(1.5); ui.ApplyCameraMotion();
+                var pose = motion.Evaluate(1.5);
+                var centre = new Vector2(Screen.width * .5f, Screen.height * .5f);
+                Click(ui, centre); ui.ApplyCameraMotion();
+                Frame(ui, centre, Vector2.zero, dolly: true); Frame(ui, centre + new Vector2(30, 0), new Vector2(30, 0), dolly: true); Frame(ui, centre + new Vector2(30, 0), Vector2.zero);
+                Frame(ui, centre, Vector2.zero, pan: true); Frame(ui, centre, Vector2.zero);
+                ui.ApplyCameraMotion();
+                var stillFollowing = ui.CameraFollowing && SamePose(camera, pose);
+                Activate(ui.Root, "explorer-camera");
+                // The hand-over itself: the first manual frame is the motion's frame, tilt and lens included.
+                var vmdFov = pose.FieldOfView; var vmdRoll = Vector3.SignedAngle(Quaternion.LookRotation(pose.Rotation * Vector3.forward) * Vector3.up, pose.Rotation * Vector3.up, pose.Rotation * Vector3.forward);
+                ui.Root.Q<Toggle>("CameraFollow").value = false;
+                var handOver = !ui.CameraFollowing && (camera.transform.position - pose.Position).magnitude < 1e-4f && Quaternion.Angle(camera.transform.rotation, pose.Rotation) < .01f &&
+                    Math.Abs(camera.fieldOfView - vmdFov) < 1e-3f && Math.Abs(ui.Graphics.Settings.fieldOfView - vmdFov) < 1e-3f && Math.Abs(Mathf.DeltaAngle(ui.View.Roll, vmdRoll)) < .01f &&
+                    Math.Abs(vmdRoll) > 1 && CameraMatchesView(ui);
+                ui.Root.Q<Toggle>("CameraFollow").value = true; ui.ApplyCameraMotion();
+                // Then a real left drag: released on its first movement, continuing from the motion's pose.
+                beforeRelease = camera.transform.position;
+                var grab = centre;
+                Frame(ui, grab, Vector2.zero, left: true);
+                Frame(ui, grab + new Vector2(6, 0), new Vector2(6, 0), left: true);  // beyond the click slop: orbit 6 px
+                var orbitExpected = Quaternion.Euler(-Mathf.Asin(Mathf.Clamp((pose.Rotation * Vector3.forward).y, -1, 1)) * Mathf.Rad2Deg,
+                    Mathf.Atan2((pose.Rotation * Vector3.forward).x, (pose.Rotation * Vector3.forward).z) * Mathf.Rad2Deg + 6 * MmdViewportCamera.DegreesPerPixel, vmdRoll);
+                var continuous = !ui.CameraFollowing && Quaternion.Angle(camera.transform.rotation, orbitExpected) < .01f && Math.Abs(camera.fieldOfView - vmdFov) < 1e-3f &&
+                    (camera.transform.position - beforeRelease).magnitude < Mathf.Abs(pose.Distance) * 6 * MmdViewportCamera.DegreesPerPixel * Mathf.Deg2Rad * 1.01f + 1e-4f;
+                Frame(ui, grab + new Vector2(36, 0), new Vector2(30, 0), left: true); Frame(ui, grab + new Vector2(36, 0), Vector2.zero);
+                var released = !ui.CameraFollowing && ui.Scene.CameraMotion == motion && !ui.Root.Q<Toggle>("CameraFollow").value &&
+                    Math.Abs(camera.fieldOfView - ui.Graphics.Settings.fieldOfView) < 1e-4f && ui.Error.Length == 0;
+                var manual = camera.transform.position;
+                ui.Scene.Seek(1.25); ui.ApplyCameraMotion();
                 var stays = (camera.transform.position - manual).magnitude < 1e-6f;
                 ui.Root.Q<Toggle>("CameraFollow").value = true;
-                var back = ui.CameraFollowing && SamePose(camera, motion.Evaluate(1.5));
-                Check("manual_navigation_releases_camera_vmd_and_follow_resumes [played=" + played + " continuous=" + continuous + " released=" + released + " stays=" + stays + " back=" + back + "]",
-                    played && continuous && released && stays && back);
+                var back = ui.CameraFollowing && SamePose(camera, motion.Evaluate(1.25));
+                Check("manual_navigation_releases_camera_vmd_and_follow_resumes [played=" + played + " kept=" + stillFollowing + " handOver=" + handOver + " (fov " + vmdFov.ToString("0.0") +
+                    ", roll " + vmdRoll.ToString("0.0") + ") continuous=" + continuous + " released=" + released + " stays=" + stays + " back=" + back + "]",
+                    played && stillFollowing && handOver && continuous && released && stays && back);
                 // Rejections keep the track: a dance VMD without camera keys, a non-VMD file.
                 dialogs.Next = Path.Combine(Path.GetDirectoryName(path), "first.vmd"); Activate(ui.Root, "CameraMotionConnect");
             }
@@ -1584,6 +1650,313 @@ namespace MmdStudio.Poc
             ui.ApplyGraphics(savedGraphics);
             if (savedSelection != null) ui.Select(savedSelection);
         }
+        // ----- v0.61 screen correction -----
+        private static int MaxChannelDiff(Color32 x, Color32 y) => Math.Max(Math.Abs(x.r - y.r), Math.Max(Math.Abs(x.g - y.g), Math.Abs(x.b - y.b)));
+        // Pixels whose colour changed (any channel by more than 2), optionally only where `mask` is true.
+        private static int PixelsChanged(Color32[] x, Color32[] y, bool[] mask = null)
+        {
+            var count = 0;
+            for (var i = 0; i < x.Length; i++) if ((mask == null || mask[i]) && MaxChannelDiff(x[i], y[i]) > 2) count++;
+            return count;
+        }
+        private static double Psnr(Color32[] x, Color32[] y)
+        {
+            double sum = 0;
+            for (var i = 0; i < x.Length; i++) sum += Sq(x[i].r - y[i].r) + Sq(x[i].g - y[i].g) + Sq(x[i].b - y[i].b);
+            return 10 * Math.Log10(255.0 * 255 / Math.Max(1e-9, sum / (x.Length * 3.0)));
+        }
+        // Where one PMX material of the object is on screen: the pixels that change when its slots
+        // draw a flat magenta material instead (independent of the correction code under test).
+        private static bool[] RegionOf(MmdSceneService.SceneObject item, int pmx, Camera camera, Color32[] reference)
+        {
+            var marker = new Material(Shader.Find("Universal Render Pipeline/Unlit")) { name = "Probe Region Marker" };
+            marker.SetColor("_BaseColor", new Color(1, 0, 1, 1));
+            var swapped = new List<(Renderer renderer, Material[] set)>();
+            try
+            {
+                foreach (var mesh in item.Model.meshes)
+                {
+                    if (mesh.renderer == null || mesh.materialIndices == null) continue;
+                    var set = mesh.renderer.sharedMaterials; var copy = (Material[])set.Clone(); var any = false;
+                    for (var i = 0; i < copy.Length && i < mesh.materialIndices.Length; i++) if (mesh.materialIndices[i] == pmx) { copy[i] = marker; any = true; }
+                    if (any) { swapped.Add((mesh.renderer, set)); mesh.renderer.sharedMaterials = copy; }
+                }
+                var pixels = RenderedPixels(camera);
+                return reference.Zip(pixels, (x, y) => MaxChannelDiff(x, y) > 2).ToArray();
+            }
+            finally
+            {
+                foreach (var (renderer, set) in swapped) renderer.sharedMaterials = set;
+                Destroy(marker);
+            }
+        }
+        // Material slots of an object that carry a correction block, as "pmx" indices (one entry per slot).
+        private static List<int> BlockedSlots(MmdSceneService.SceneObject item, Func<MaterialPropertyBlock, bool> test = null)
+        {
+            var list = new List<int>(); var block = new MaterialPropertyBlock();
+            foreach (var mesh in item.Model.meshes)
+            {
+                if (mesh.renderer == null) continue;
+                for (var i = 0; i < mesh.renderer.sharedMaterials.Length; i++)
+                {
+                    mesh.renderer.GetPropertyBlock(block, i);
+                    if (!block.isEmpty && (test == null || test(block))) list.Add(mesh.materialIndices != null && i < mesh.materialIndices.Length ? mesh.materialIndices[i] : -1);
+                }
+            }
+            return list;
+        }
+        private readonly Dictionary<string, string> expectedCorrections = new Dictionary<string, string>();
+        private void CorrectionChecks(MmdSceneWorkspace ui, MmdSceneService.SceneObject a, MmdSceneService.SceneObject b, MmdSceneService.SceneObject stage, string directory)
+        {
+            var camera = Camera.main; var view = ui.View;
+            var savedView = (view.Pivot, view.Yaw, view.Pitch, view.Distance);
+            var savedGraphics = ui.Graphics.Settings; var savedSelection = ui.SelectedId;
+            // Deterministic frames: no SSAO noise, no bloom spill across materials.
+            var plain = ui.Graphics.Settings; plain.ssaoEnabled = false; plain.dofEnabled = false; plain.vignetteEnabled = false; plain.bloomEnabled = false;
+            ui.ApplyGraphics(plain);
+
+            // The matching rules on their own: exact, moved (unique name), ambiguous and missing names.
+            var names = new[] { "skin", "cloth", "cloth", "hair" };
+            var rules = new ColorCorrectionData();
+            foreach (var (index, name) in new[] { (0, "skin"), (5, "hair"), (9, "cloth"), (1, "eyes"), (2, "cloth") }) rules.materials.Add(new MaterialCorrectionData { index = index, name = name });
+            var r = MmdMaterialStyler.ResolveCorrections(rules, names.Length, i => names[i]);
+            Check("correction_material_matching_rules [" + string.Join(" | ", r.Problems.Values) + "]", r.ByPmx.Count == 3 && r.ByPmx[0] == rules.materials[0] &&
+                r.ByPmx[3] == rules.materials[1] && r.Moved.ContainsKey(rules.materials[1]) && r.ByPmx[2] == rules.materials[4] &&
+                r.Problems.ContainsKey(rules.materials[2]) && r.Problems.ContainsKey(rules.materials[3]));
+
+            // A click on the character selects it and chooses the material under the cursor.
+            ui.FrameIds(a.Id);
+            Activate(ui.Root, "object-" + a.Id);
+            MmdSceneWorkspace.TryBounds(new[] { a }, out var aBounds);
+            Vector2? point = null;
+            foreach (var world in new[] { BodyPoint(a), aBounds.center, aBounds.center + Vector3.up * .3f, aBounds.center - Vector3.up * .3f })
+            {
+                var screen = Camera.main.WorldToScreenPoint(world); var candidate = new Vector2(screen.x, screen.y);
+                if (point == null && screen.z > 0 && ui.GizmoHandleAt(candidate) < 0 && ui.RaycastScene(candidate).Item == a) point = candidate;
+            }
+            if (point == null) throw new InvalidOperationException("No point on the first character for the material pick");
+            var hit = ui.RaycastScene(point.Value);
+            Click(ui, point.Value);
+            var styler = a.Styler;
+            var dropdown = ui.Root.Q<DropdownField>("CorrectionMaterial");
+            var drawn = Enumerable.Range(0, styler.PmxMaterialCount).Count(styler.PmxDrawn);
+            Check("viewport_click_picks_object_and_material_under_cursor [#" + hit.PmxMaterial + " " + styler.PmxName(hit.PmxMaterial) + ", list " + dropdown.choices.Count + "/" + styler.PmxMaterialCount + " PMX]",
+                ui.SelectedId == a.Id && hit.PmxMaterial >= 0 && ui.CorrectionPmx == hit.PmxMaterial && dropdown.value.StartsWith(hit.PmxMaterial + " · ") &&
+                dropdown.choices.Count == drawn && drawn > 1 && !ui.Root.Q<Foldout>("CorrectionMaterials").value && ui.Root.Q("CorrectionSection").style.display.value != DisplayStyle.None);
+            ui.Root.Q<Foldout>("CorrectionMaterials").value = true; // opened when needed
+
+            // Frames without the selection highlight; the material choice survives reselection.
+            Color32[] Shot() { var keep = ui.SelectedId; Activate(ui.Root, "explorer-light"); var pixels = RenderedPixels(camera); if (keep != null) Activate(ui.Root, "object-" + keep); return pixels; }
+            Activate(ui.Root, "explorer-light");
+            var neutral = RenderedPixels(camera);
+            SaveRendered(camera, Path.Combine(directory, "correction-before.png"));
+            // The test material: the one with the most well-lit pixels on screen (a black material cannot show a multiplier).
+            int test = -1, best = 0; bool[] region = null;
+            for (var i = 0; i < styler.PmxMaterialCount; i++)
+            {
+                if (!styler.PmxDrawn(i)) continue;
+                var candidate = RegionOf(a, i, camera, neutral);
+                var score = 0;
+                for (var p = 0; p < candidate.Length; p++) if (candidate[p] && neutral[p].r + neutral[p].g + neutral[p].b > 240) score++;
+                if (score > best) { best = score; test = i; region = candidate; }
+            }
+            if (test < 0) throw new InvalidOperationException("No lit PMX material of the first character is on screen");
+            var outside = region.Select(v => !v).ToArray();
+            Activate(ui.Root, "object-" + a.Id);
+            var testName = styler.PmxName(test);
+            dropdown.value = dropdown.choices.First(c => c.StartsWith(test + " · "));
+            var chosen = ui.CorrectionPmx == test;
+
+            // One material: colour (coalesced into one undo step), only its own pixels change.
+            ui.Root.Q<Slider>("CorrectionMaterialG").value = .7f; ui.Root.Q<Slider>("CorrectionMaterialB").value = .7f;
+            var tinted = Shot();
+            var inside = PixelsChanged(neutral, tinted); var leaked = PixelsChanged(neutral, tinted, outside);
+            var slots = BlockedSlots(a);
+            var onlyThere = slots.Count > 0 && slots.All(p => p == test) && BlockedSlots(b).Count == 0 && BlockedSlots(stage).Count == 0;
+            var oneStep = ui.UndoLabel == "재질 보정: " + testName && a.Correction.materials.Count == 1 && a.Correction.materials[0].index == test && a.Correction.materials[0].name == testName;
+            Check("one_material_correction_changes_only_that_material [#" + test + " " + testName + ": region " + region.Count(v => v) + " px, changed " + inside + ", outside " + leaked +
+                ", slots " + slots.Count + "]", chosen && inside > 20 && leaked == 0 && onlyThere && oneStep && dropdown.value.EndsWith("보정됨"));
+            SaveRendered(camera, Path.Combine(directory, "correction-material.png"));
+
+            // Gloss: the toon highlight, on that material only.
+            var glossSlider = ui.Root.Q<Slider>("CorrectionGloss");
+            var glossOffered = glossSlider.enabledSelf && ui.Root.Q<Label>("CorrectionSupport").text.Contains("툰 하이라이트");
+            glossSlider.value = 1;
+            var glossy = Shot();
+            var glossChanged = PixelsChanged(tinted, glossy); var glossLeaked = PixelsChanged(tinted, glossy, outside);
+            var glossBlocks = BlockedSlots(a, block => block.GetFloat("_Gloss") > .99f);
+            Check("gloss_adds_highlight_on_that_material_only [changed " + glossChanged + " px, outside " + glossLeaked + "]",
+                glossOffered && glossChanged > 0 && glossLeaked == 0 && glossBlocks.Count > 0 && glossBlocks.All(p => p == test));
+
+            // The object's colour and brightness: all of its materials, nothing else in the scene.
+            ui.Root.Q<Slider>("CorrectionBrightness").value = .6f;
+            var dim = Shot();
+            var objectChanged = PixelsChanged(glossy, dim);
+            Check("object_brightness_changes_whole_object_only [changed " + objectChanged + " px vs one material " + inside + "]",
+                objectChanged > inside && BlockedSlots(a).Count > slots.Count && BlockedSlots(b).Count == 0 && BlockedSlots(stage).Count == 0 &&
+                ui.Root.Q<Label>("CorrectionStatus").text.Contains("적용 중"));
+            SaveRendered(camera, Path.Combine(directory, "correction-after.png"));
+
+            // One button: the same frame from the same camera without any correction, and back.
+            var pose = (camera.transform.position, camera.transform.rotation, camera.fieldOfView, ui.Scene.Seconds);
+            Activate(ui.Root, "CorrectionCompare");
+            var off = !ui.Scene.CorrectionsShown && ui.Root.Q<Label>("CorrectionCompareChip").style.display.value != DisplayStyle.None &&
+                ui.Root.Q<Button>("CorrectionCompare").text == "보정 후 보기" && ui.Root.Q<Label>("CorrectionStatus").text.Contains("꺼짐");
+            var beforeShot = Shot();
+            Activate(ui.Root, "CorrectionCompare");
+            var afterShot = Shot();
+            var samePose = (camera.transform.position, camera.transform.rotation, camera.fieldOfView, ui.Scene.Seconds) == pose;
+            Check("compare_button_shows_before_and_after_in_place [before vs neutral " + PixelsChanged(neutral, beforeShot) + " px, after vs corrected " + PixelsChanged(dim, afterShot) + " px]",
+                off && PixelsChanged(neutral, beforeShot) == 0 && PixelsChanged(dim, afterShot) == 0 && ui.Scene.CorrectionsShown && samePose &&
+                ui.Root.Q<Label>("CorrectionCompareChip").style.display.value == DisplayStyle.None);
+
+            // Reset only the chosen material; the object values stay. Undo and redo.
+            var withMaterial = JsonUtility.ToJson(a.Correction);
+            Activate(ui.Root, "CorrectionMaterialReset");
+            var reset = a.Correction.materials.Count == 0 && Near(a.Correction.brightness, .6f) && BlockedSlots(a, block => block.HasFloat("_Gloss")).Count == 0;
+            ui.Undo();
+            var undone = JsonUtility.ToJson(a.Correction) == withMaterial;
+            ui.Redo(); var redone = a.Correction.materials.Count == 0; ui.Undo();
+            Check("reset_one_material_keeps_object_values_and_undoes [reset=" + reset + " undo=" + undone + " redo=" + redone + "]",
+                reset && undone && redone && JsonUtility.ToJson(a.Correction) == withMaterial && PixelsChanged(dim, Shot()) == 0);
+
+            // An entry that matches no material of this model is kept, applied nowhere, and explained.
+            var kept = a.Correction.Clone();
+            var bogus = a.Correction.Clone(); bogus.materials.Add(new MaterialCorrectionData { index = 4000, name = "存在しない材質", tint = Color.black });
+            ui.Scene.SetCorrection(a.Id, bogus); Activate(ui.Root, "object-" + a.Id);
+            var problems = ui.Root.Q<Label>("CorrectionProblems");
+            var listed = problems.style.display.value != DisplayStyle.None && problems.text.Contains("存在しない材質") && problems.text.Contains("적용하지 않고") &&
+                ui.Root.Q<Label>("CorrectionStatus").text.Contains("적용 못 한 재질 1개");
+            var untouched = PixelsChanged(dim, Shot()) == 0;
+            var stored = ui.Capture(Path.Combine(directory, "probe.mmdscene")).sceneObjects.First(o => o.id == a.Id).correction.materials.Any(m => m.name == "存在しない材質");
+            ui.Scene.SetCorrection(a.Id, kept); Activate(ui.Root, "object-" + a.Id);
+            Check("unmatched_material_correction_kept_applied_nowhere_and_explained [listed=" + listed + " untouched=" + untouched + " stored=" + stored + "]", listed && untouched && stored);
+
+            // Gloss needs a lit style: offered as unsupported on the original (unlit) style.
+            Activate(ui.Root, "object-" + b.Id);
+            var unlit = b.MaterialStyle.style == MaterialStyleData.Original && !ui.Root.Q<Slider>("CorrectionGloss").enabledSelf &&
+                ui.Root.Q<Label>("CorrectionSupport").text.Contains("광택 ×");
+            Check("gloss_marked_unsupported_on_original_style", unlit);
+
+            // Leave corrections for the save/relaunch checks: the first character (object + one
+            // material with gloss) and the stage (object brightness). The second character stays neutral.
+            Activate(ui.Root, "object-" + a.Id);
+            ui.Root.Q<Slider>("CorrectionBrightness").value = 1.1f; ui.Root.Q<Slider>("CorrectionTintB").value = .9f;
+            ui.Root.Q<Slider>("CorrectionMaterialG").value = .85f; ui.Root.Q<Slider>("CorrectionMaterialB").value = .85f; ui.Root.Q<Slider>("CorrectionGloss").value = .5f;
+            Activate(ui.Root, "object-" + stage.Id);
+            ui.Root.Q<Slider>("CorrectionBrightness").value = .85f;
+            expectedCorrections.Clear();
+            foreach (var item in new[] { a, b, stage }) expectedCorrections[item.Id] = JsonUtility.ToJson(item.Correction);
+            correctionTestMaterial = test;
+            Check("corrections_left_for_relaunch [" + string.Join(" | ", new[] { a, stage }.Select(o => Path.GetFileNameWithoutExtension(o.ModelSource) + ": " + JsonUtility.ToJson(o.Correction))) + "]",
+                !a.Correction.IsNeutral && a.Correction.materials.Count == 1 && !stage.Correction.ObjectNeutral && b.Correction.IsNeutral && BlockedSlots(stage).Count > 0);
+
+            view.Set(savedView.Pivot, savedView.Yaw, savedView.Pitch, savedView.Distance); view.Apply(camera);
+            ui.ApplyGraphics(savedGraphics);
+            if (savedSelection != null) ui.Select(savedSelection);
+        }
+        private int correctionTestMaterial = -1;
+
+        // The corrected character after save/reopen: the same values, and the preview and the PNG
+        // output of the same frame agree, before and after the correction.
+        private IEnumerator CorrectionOutputChecks(MmdSceneWorkspace ui, string path, Action<string> fail)
+        {
+            var dir = Path.Combine(Path.GetDirectoryName(path), "correction");
+            var small = new OutputData { preset = OutputData.Custom, width = 640, height = 360, fps = 30 };
+            var camera = Camera.main;
+            var savedGraphics = ui.Graphics.Settings; var savedSelection = ui.SelectedId;
+            var savedView = (ui.View.Pivot, ui.View.Yaw, ui.View.Pitch, ui.View.Distance, ui.View.Roll);
+            MmdSceneService.SceneObject item = null; ColorCorrectionData keep = null;
+            var keepAll = new Dictionary<string, ColorCorrectionData>();
+            Color32[] previewAfter = null, previewBefore = null;
+            try
+            {
+                if (Directory.Exists(dir)) Directory.Delete(dir, true);
+                Directory.CreateDirectory(dir);
+                var restored = ui.Scene.Objects.All(o => expectedCorrections.TryGetValue(o.Id, out var json) && json == JsonUtility.ToJson(o.Correction));
+                item = ui.Scene.Objects.FirstOrDefault(o => o.Kind == MmdSceneService.ObjectKind.Character && !o.Correction.IsNeutral);
+                Check("corrections_survive_save_and_reopen [" + ui.Scene.Objects.Count + " objects]", restored && item != null && item.Styler != null && item.Styler.CorrectedSlots > 0 &&
+                    item.Styler.Resolution.Problems.Count == 0);
+                keep = item.Correction.Clone();
+                var plain = ui.Graphics.Settings; plain.ssaoEnabled = false; plain.dofEnabled = false; plain.vignetteEnabled = false; plain.bloomEnabled = false;
+                ui.Graphics.Apply(plain);
+                if (ui.CameraFollowing) ui.SetCameraFollow(false);
+                ui.FrameIds(item.Id); ui.SelectTarget(MmdSceneWorkspace.InspectorTarget.Light);
+                ui.Scene.Playing = false; ui.Scene.Seek(.75);
+            }
+            catch (Exception ex) { fail(ex.ToString()); yield break; }
+            // Output finishes the physics bake before rendering; the preview must show the same pose.
+            for (var guard = 0; ui.Scene.PhysicsBaking && guard < 20000; guard++) { ui.Scene.BakePhysicsSlice(); yield return null; }
+            yield return null; // the skinned pose of this time is in place after a LateUpdate
+            try
+            {
+                ui.Scene.Seek(.75);
+                previewAfter = RenderedPixels(camera, small.width, small.height);
+                ui.StartOutput(MmdSceneWorkspace.OutputFormat.Png, small, 0, 0, Path.Combine(dir, "output-after.png"));
+            }
+            catch (Exception ex) { fail(ex.ToString()); yield break; }
+            yield return null;
+            while (ui.Busy) yield return null;
+            try
+            {
+                ui.Scene.ShowCorrections(false);
+                previewBefore = RenderedPixels(camera, small.width, small.height);
+                ui.Scene.ShowCorrections(true);
+                // Output always draws the corrections, so the "before" output is made without any
+                // (the preview's "보정 전 보기" turns off every object's correction, the stage's too).
+                foreach (var o in ui.Scene.Objects) { keepAll[o.Id] = o.Correction.Clone(); ui.Scene.SetCorrection(o.Id, new ColorCorrectionData()); }
+                ui.StartOutput(MmdSceneWorkspace.OutputFormat.Png, small, 0, 0, Path.Combine(dir, "output-before.png"));
+            }
+            catch (Exception ex) { fail(ex.ToString()); yield break; }
+            yield return null;
+            while (ui.Busy) yield return null;
+            try
+            {
+                foreach (var entry in keepAll) ui.Scene.SetCorrection(entry.Key, entry.Value);
+                var outputAfter = LoadPng(Path.Combine(dir, "output-after.png")); var outputBefore = LoadPng(Path.Combine(dir, "output-before.png"));
+                var after = outputAfter.GetPixels32(); var before = outputBefore.GetPixels32();
+                SavePixels(previewAfter, small.width, small.height, Path.Combine(dir, "preview-after.png"));
+                SavePixels(previewBefore, small.width, small.height, Path.Combine(dir, "preview-before.png"));
+                var matchAfter = Psnr(previewAfter, after); var matchBefore = Psnr(previewBefore, before);
+                var changed = PixelsChanged(before, after);
+                var environment = SystemInfo.graphicsDeviceName + " · " + Screen.width + "x" + Screen.height + " · " + Path.GetFileNameWithoutExtension(item.ModelSource) +
+                    " #" + correctionTestMaterial + " · " + small.width + "x" + small.height;
+                Debug.Log("[correction-probe] " + environment + " · preview/output after " + matchAfter.ToString("0.0") + " dB, before " + matchBefore.ToString("0.0") + " dB, changed " + changed);
+                Check("preview_and_output_use_the_same_correction [after " + matchAfter.ToString("0.0") + " dB, before " + matchBefore.ToString("0.0") + " dB, corrected pixels " + changed +
+                    "; " + environment + "]", matchAfter > 40 && matchBefore > 40 && changed > 50 && ui.Error.Length == 0 && JsonUtility.ToJson(item.Correction) == JsonUtility.ToJson(keep));
+                Destroy(outputAfter); Destroy(outputBefore);
+                ui.Graphics.Apply(savedGraphics);
+                ui.View.Set(savedView.Pivot, savedView.Yaw, savedView.Pitch, savedView.Distance, savedView.Roll); ui.View.Apply(camera);
+                if (savedSelection != null && ui.Scene.Objects.Any(o => o.Id == savedSelection)) ui.Select(savedSelection);
+            }
+            catch (Exception ex) { fail(ex.ToString()); }
+        }
+        private static Color32[] RenderedPixels(Camera camera, int width, int height)
+        {
+            var texture = RenderTexture.GetTemporary(width, height, 24);
+            var previousTarget = camera.targetTexture; var previousRect = camera.rect; var previousActive = RenderTexture.active;
+            var pixels = new Texture2D(width, height, TextureFormat.RGBA32, false);
+            try
+            {
+                camera.targetTexture = texture; camera.rect = new Rect(0, 0, 1, 1);
+                camera.Render();
+                RenderTexture.active = texture;
+                pixels.ReadPixels(new Rect(0, 0, width, height), 0, 0); pixels.Apply();
+                return pixels.GetPixels32();
+            }
+            finally
+            {
+                RenderTexture.active = previousActive; camera.targetTexture = previousTarget; camera.rect = previousRect;
+                RenderTexture.ReleaseTemporary(texture); Destroy(pixels);
+            }
+        }
+        private static void SavePixels(Color32[] pixels, int width, int height, string file)
+        {
+            var texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
+            try { texture.SetPixels32(pixels); texture.Apply(); File.WriteAllBytes(file, texture.EncodeToPNG()); }
+            finally { Destroy(texture); }
+        }
+
         // ----- H3 output -----
         private static double Sq(int value) => value * (double)value;
         private static Texture2D LoadPng(string file)
@@ -2175,8 +2548,9 @@ namespace MmdStudio.Poc
                     }
             return true;
         }
-        private static void Frame(MmdSceneWorkspace ui, Vector2 screen, Vector2 delta, float wheel = 0, bool orbit = false, bool pan = false, bool frameKey = false, bool left = false) =>
-            ui.ProcessViewportInput(screen, delta, wheel, orbit, pan, frameKey, left);
+        // dolly: right button without Shift (v0.61; it orbited before). Left drag orbits.
+        private static void Frame(MmdSceneWorkspace ui, Vector2 screen, Vector2 delta, float wheel = 0, bool dolly = false, bool pan = false, bool frameKey = false, bool left = false, bool focusLost = false) =>
+            ui.ProcessViewportInput(screen, delta, wheel, dolly, pan, frameKey, left, focusLost: focusLost);
         private static void Click(MmdSceneWorkspace ui, Vector2 screen)
         {
             Frame(ui, screen, Vector2.zero, left: true);
@@ -2581,12 +2955,20 @@ namespace MmdStudio.Poc
             Check("viewport_click_selects_character_under_cursor", ui.PointerInViewport(bPoint) && ui.SelectedId == b.Id &&
                 ui.Root.Q<Label>("SelectionTitle").text == "선택한 캐릭터" && ui.HighlightVisible && Near(ui.HighlightBounds.center, bBounds.center));
 
+            // v0.61: a left drag that starts on another character orbits; its release does not pick.
             var before = (view.Yaw, view.Pitch, view.Distance, view.Pivot);
+            var leftOrbitYaw = Mathf.Repeat(view.Yaw + 24 * MmdViewportCamera.DegreesPerPixel, 360);
+            if (ui.GizmoHandleAt(aPoint) >= 0) throw new InvalidOperationException("The left-drag check would start on the gizmo of the selected character");
             Frame(ui, aPoint, Vector2.zero, left: true);
-            Frame(ui, aPoint + new Vector2(12, 0), new Vector2(12, 0), left: true);
+            Frame(ui, aPoint + new Vector2(3, 0), new Vector2(3, 0), left: true);   // within the click slop: nothing yet
+            var heldStill = (view.Yaw, view.Pitch, view.Distance, view.Pivot) == before;
+            Frame(ui, aPoint + new Vector2(12, 0), new Vector2(9, 0), left: true);  // beyond: orbit catches up 12 px
             Frame(ui, aPoint + new Vector2(24, 0), new Vector2(12, 0), left: true);
             Frame(ui, aPoint + new Vector2(24, 0), Vector2.zero);
-            Check("viewport_left_drag_neither_picks_nor_moves_camera", ui.SelectedId == b.Id && (view.Yaw, view.Pitch, view.Distance, view.Pivot) == before);
+            Check("viewport_left_drag_orbits_without_picking [yaw " + before.Yaw.ToString("0.00") + "->" + view.Yaw.ToString("0.00") + "]", heldStill && ui.SelectedId == b.Id &&
+                Near(view.Yaw, leftOrbitYaw) && Near(view.Pitch, before.Pitch) && Near(view.Distance, before.Distance) && Near(view.Pivot, before.Pivot) && CameraMatchesView(ui) &&
+                ui.HighlightVisible && Near(ui.HighlightBounds.center, bBounds.center, .05f));
+            view.Set(before.Pivot, before.Yaw, before.Pitch, before.Distance); view.Apply(Camera.main);
 
             Vector2? floor = null;
             foreach (var x in new[] { 0f, -.5f, .5f, -2f, 2f })
@@ -2634,9 +3016,10 @@ namespace MmdStudio.Poc
 
             before = (view.Yaw, view.Pitch, view.Distance, view.Pivot);
             var centre = rect.center;
-            Frame(ui, centre, Vector2.zero, orbit: true);
-            Frame(ui, centre, new Vector2(40, 0), orbit: true);
+            Frame(ui, centre, Vector2.zero, dolly: true);
+            Frame(ui, centre + new Vector2(0, 40), new Vector2(0, 40), dolly: true);
             Frame(ui, centre, Vector2.zero);
+            LeftDrag(ui, centre, centre + new Vector2(40, 0));
             Frame(ui, centre, Vector2.zero, wheel: 2);
             Click(ui, bPoint);
             Key(ui, play: true);
@@ -2665,17 +3048,35 @@ namespace MmdStudio.Poc
                 ui.SafeViewportRect().Contains((Vector2)Camera.main.WorldToScreenPoint(all.center)));
             Check("frame_all_fits_visible_bounds_between_cards", BoundsInside(all, ui.SafeViewportRect()));
 
+            // Left presses must not land on the selected character's gizmo handles (that would move it).
+            Vector2 Free(Vector2 point) { for (var i = 0; i < 10 && ui.GizmoHandleAt(point) >= 0; i++) point += new Vector2(0, 40); return point; }
             var yaw = view.Yaw; var pitch = view.Pitch; var distance = view.Distance; var pivot = view.Pivot;
-            Frame(ui, centre, Vector2.zero, orbit: true);                 // press
-            Frame(ui, centre + new Vector2(40, 0), new Vector2(40, -20), orbit: true);
-            Check("orbit_drag_in_viewport_rotates_around_fixed_pivot",
+            var selectedBefore = ui.SelectedId;
+            centre = Free(centre);
+            Frame(ui, centre, Vector2.zero, left: true);                  // press (a click until it moves 5 px)
+            Frame(ui, centre + new Vector2(40, -20), new Vector2(40, -20), left: true);
+            Check("left_drag_in_viewport_rotates_around_fixed_pivot",
                 Near(view.Yaw, Mathf.Repeat(yaw + 40 * MmdViewportCamera.DegreesPerPixel, 360)) && Near(view.Pitch, pitch + 20 * MmdViewportCamera.DegreesPerPixel) &&
                 Near(view.Distance, distance) && Near(view.Pivot, pivot) && Near((Camera.main.transform.position - pivot).magnitude, distance) && CameraMatchesView(ui));
             // Continue the same drag across the left panel: capture keeps orbiting.
             yaw = view.Yaw;
-            Frame(ui, sidebar, new Vector2(10, 0), orbit: true);
+            Frame(ui, sidebar, new Vector2(10, 0), left: true);
             Check("started_drag_continues_over_panel", Near(view.Yaw, Mathf.Repeat(yaw + 10 * MmdViewportCamera.DegreesPerPixel, 360)));
             Frame(ui, sidebar, Vector2.zero);                               // release
+            Check("orbit_release_keeps_selection", ui.SelectedId == selectedBefore);
+
+            // v0.61 right drag: up comes closer, down goes back; horizontal movement and the lens are untouched.
+            var fov = Camera.main.fieldOfView; distance = view.Distance; pivot = view.Pivot; yaw = view.Yaw; pitch = view.Pitch;
+            Frame(ui, centre, Vector2.zero, dolly: true);
+            Frame(ui, centre + new Vector2(60, 0), new Vector2(60, 0), dolly: true);
+            var sideways = Near(view.Distance, distance);
+            Frame(ui, centre + new Vector2(60, 60), new Vector2(0, 60), dolly: true);
+            var closer = view.Distance; var expected = distance * Mathf.Exp(-60f / Camera.main.pixelHeight * MmdViewportCamera.DollyPerViewport);
+            Frame(ui, centre + new Vector2(60, 0), new Vector2(0, -60), dolly: true);
+            Frame(ui, centre + new Vector2(60, 0), Vector2.zero);
+            Check("right_drag_dollies_vertically_keeping_pivot_and_lens [" + distance.ToString("0.000") + "->" + closer.ToString("0.000") + "->" + view.Distance.ToString("0.000") + "]",
+                sideways && Near(closer, expected) && closer < distance && Near(view.Distance, distance) && Near(view.Pivot, pivot) && Near(view.Yaw, yaw) && Near(view.Pitch, pitch) &&
+                Camera.main.fieldOfView == fov && CameraMatchesView(ui));
 
             pivot = view.Pivot; var cameraBefore = Camera.main.transform.position; yaw = view.Yaw; pitch = view.Pitch;
             Frame(ui, centre, Vector2.zero, pan: true);
@@ -2686,13 +3087,55 @@ namespace MmdStudio.Poc
                 moved.magnitude > 1e-4f && Near(Camera.main.transform.position - cameraBefore, moved) && Near(view.Yaw, yaw) && Near(view.Pitch, pitch) &&
                 Vector3.Dot(moved, Camera.main.transform.right) < 0 && Vector3.Dot(moved, Camera.main.transform.up) < 0);
 
-            distance = view.Distance;
-            Frame(ui, centre, Vector2.zero, wheel: 2);
-            Check("wheel_in_viewport_zooms_toward_pivot", Near(view.Distance, distance * MmdViewportCamera.ZoomPerNotch * MmdViewportCamera.ZoomPerNotch) && CameraMatchesView(ui));
+            // Wheel over empty space: toward the pivot.
+            Vector2? empty = null;
+            foreach (var corner in new[] { new Vector2(rect.xMin + 8, rect.yMax - 8), new Vector2(rect.xMax - 8, rect.yMax - 8), new Vector2(rect.center.x, rect.yMax - 8),
+                                           new Vector2(rect.xMin + 8, rect.yMin + 30), new Vector2(rect.xMax - 8, rect.yMin + 30) })
+                if (empty == null && ui.PointerInViewport(corner) && ui.RaycastScene(corner).Item == null) empty = corner;
+            if (empty == null) throw new InvalidOperationException("No empty viewport point for the wheel check");
+            distance = view.Distance; pivot = view.Pivot;
+            Frame(ui, empty.Value, Vector2.zero, wheel: 2);
+            Check("wheel_over_empty_space_zooms_toward_pivot", Near(view.Distance, distance * MmdViewportCamera.ZoomPerNotch * MmdViewportCamera.ZoomPerNotch) &&
+                Near(view.Pivot, pivot) && !ui.LastZoomHitSurface && CameraMatchesView(ui));
+
+            // Wheel over a character: the surface point under the cursor keeps its screen position,
+            // the camera keeps its direction and lens, the pivot moves to the point's depth.
+            var bodyScreen = ScreenOf(BodyPoint(b));
+            var hit = ui.RaycastScene(bodyScreen);
+            if (hit.Item == null) throw new InvalidOperationException("No character surface under the body point");
+            var queries = System.Diagnostics.Stopwatch.StartNew();
+            for (var i = 0; i < 20; i++) ui.RaycastScene(bodyScreen);
+            var queryMs = queries.Elapsed.TotalMilliseconds / 20;
+            var rotationBefore = Camera.main.transform.rotation; distance = view.Distance; fov = Camera.main.fieldOfView;
+            var cameraToHit = (hit.Point - Camera.main.transform.position).magnitude;
+            Frame(ui, bodyScreen, Vector2.zero, wheel: 2);
+            var drift = ((Vector2)Camera.main.WorldToScreenPoint(hit.Point) - bodyScreen).magnitude;
+            var approach = (hit.Point - Camera.main.transform.position).magnitude / cameraToHit;
+            var depth = Vector3.Dot(hit.Point - Camera.main.transform.position, Camera.main.transform.forward);
+            Check("wheel_over_surface_zooms_toward_point_under_cursor [drift " + drift.ToString("0.000") + " px, approach x" + approach.ToString("0.000") +
+                ", surface query " + queryMs.ToString("0.00") + " ms with " + ui.Scene.Objects.Count + " objects]",
+                ui.LastZoomHitSurface && drift < .5f && Near(approach, MmdViewportCamera.ZoomPerNotch * MmdViewportCamera.ZoomPerNotch, 1e-3f) &&
+                Quaternion.Angle(rotationBefore, Camera.main.transform.rotation) < .01f && Camera.main.fieldOfView == fov && Near(view.Distance, depth, 1e-3f) && CameraMatchesView(ui) &&
+                queryMs < 25);
+            // F frames the selection again (a new pivot); FrameAll restores the overview for the next checks.
+            Activate(ui.Root, "FrameAll");
+
+            // Focus loss (Alt+Tab) ends a drag; the still-held button does not resume it.
+            centre = Free(rect.center);
+            yaw = view.Yaw;
+            Frame(ui, centre, Vector2.zero, left: true);
+            Frame(ui, centre + new Vector2(10, 0), new Vector2(10, 0), left: true);
+            var orbitedYaw = view.Yaw;
+            Frame(ui, centre + new Vector2(20, 0), new Vector2(10, 0), left: true, focusLost: true);
+            Frame(ui, centre + new Vector2(40, 0), new Vector2(20, 0), left: true);
+            Frame(ui, centre + new Vector2(40, 0), Vector2.zero);
+            Check("focus_loss_ends_drag", !Near(orbitedYaw, yaw) && Near(view.Yaw, orbitedYaw) && !ui.PointerDragging && ui.SelectedId == selectedBefore);
+            Activate(ui.Root, "FrameAll");
 
             var before = (view.Yaw, view.Pitch, view.Distance, view.Pivot);
-            Frame(ui, sidebar, Vector2.zero, orbit: true);
-            Frame(ui, sidebar, new Vector2(50, 50), orbit: true);
+            LeftDrag(ui, sidebar, sidebar + new Vector2(50, 50));
+            Frame(ui, sidebar, Vector2.zero, dolly: true);
+            Frame(ui, sidebar + new Vector2(50, 50), new Vector2(50, 50), dolly: true);
             Frame(ui, sidebar, Vector2.zero);
             Frame(ui, toolbar, Vector2.zero, pan: true);
             Frame(ui, toolbar, new Vector2(50, 50), pan: true);
@@ -2705,9 +3148,7 @@ namespace MmdStudio.Poc
             Check("text_field_focus_detected", ui.TextInputFocused());
             Frame(ui, centre, Vector2.zero, wheel: 3, frameKey: true);
             Check("text_focus_blocks_wheel_and_frame_shortcut", (view.Yaw, view.Pitch, view.Distance, view.Pivot) == before);
-            Frame(ui, centre, Vector2.zero, orbit: true);
-            Frame(ui, centre, new Vector2(30, 0), orbit: true);
-            Frame(ui, centre, Vector2.zero);
+            LeftDrag(ui, centre, centre + new Vector2(30, 0));
             Check("viewport_press_commits_text_focus_without_rotating", !ui.TextInputFocused() && (view.Yaw, view.Pitch, view.Distance, view.Pivot) == before);
 
             Activate(ui.Root, "object-" + b.Id);
@@ -2724,8 +3165,14 @@ namespace MmdStudio.Poc
             MmdSceneWorkspace.TryBounds(new[] { a }, out var aBounds);
             Check("reselection_restores_highlight_on_selected", ui.HighlightVisible && Near(ui.HighlightBounds.center, aBounds.center));
             Frame(ui, centre, Vector2.zero, wheel: float.NaN);
-            Frame(ui, centre, Vector2.zero, orbit: true);
-            Frame(ui, centre, new Vector2(float.PositiveInfinity, 0), orbit: true);
+            centre = Free(centre);
+            Frame(ui, centre, Vector2.zero, left: true);
+            Frame(ui, centre + new Vector2(10, 0), new Vector2(10, 0), left: true);
+            Frame(ui, centre + new Vector2(10, 0), new Vector2(float.PositiveInfinity, 0), left: true);
+            Frame(ui, centre + new Vector2(10, 0), Vector2.zero);
+            Frame(ui, centre, Vector2.zero, dolly: true);
+            Frame(ui, centre, new Vector2(0, float.NaN), dolly: true);
+            Frame(ui, centre, new Vector2(0, 1e9f), dolly: true);
             Frame(ui, centre, Vector2.zero);
             Frame(ui, centre, Vector2.zero, wheel: -1000);
             Check("nonfinite_and_extreme_input_keeps_camera_finite_and_clamped",

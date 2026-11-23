@@ -61,6 +61,8 @@ namespace MmdStudio.Poc
             internal MmdMaterialStyler Styler { get; set; }
             internal MmdMaterialStyler StylerOrCreate => Styler ?? (Styler = new MmdMaterialStyler(Model));
             public string[] MaterialWarnings => StylerOrCreate.Warnings(MaterialStyle.style);
+            // v0.61: screen correction (object colour/brightness, per-PMX-material colour/gloss).
+            public ColorCorrectionData Correction { get; internal set; } = new ColorCorrectionData();
             public string[] MotionParts => (Bake == null ? new string[0] : Bake.Parts)
                 .Union(SpringBake == null ? new string[0] : SpringBake.Parts)
                 .OrderBy(p => Array.IndexOf(MmdPhysicsParts.Order, p)).ToArray();
@@ -397,6 +399,7 @@ namespace MmdStudio.Poc
             objects.Insert(Mathf.Clamp(index, 0, objects.Count), item);
             if (item.Motion != null) item.Motion.AcquireSceneClock(this);
             foreach (var renderer in item.Model.root.GetComponentsInChildren<Renderer>(true)) renderer.enabled = item.Visible;
+            item.Styler?.ShowCorrection(CorrectionsShown); // the before/after view may have changed while detached
             settleThroughFrame = Time.frameCount + 1;
             Seek(Seconds);
         }
@@ -536,6 +539,24 @@ namespace MmdStudio.Poc
             if (next.style == MaterialStyleData.Pbr && item.Kind != ObjectKind.Stage) throw new InvalidOperationException("PBR 재질은 배경에만 쓸 수 있습니다.");
             if (next.style != MaterialStyleData.Original || item.Styler != null) item.StylerOrCreate.Apply(next);
             item.MaterialStyle = next;
+        }
+
+        // v0.61: screen correction of one object. Entries whose PMX material cannot be identified
+        // are kept in the data and applied to nothing (the styler's Resolution says why).
+        public void SetCorrection(string id, ColorCorrectionData data)
+        {
+            if (data == null) throw new ArgumentNullException(nameof(data));
+            var next = data.Clone(); next.Validate();
+            var item = Find(id);
+            if (!next.IsNeutral || item.Styler != null) item.StylerOrCreate.ApplyCorrection(next, CorrectionsShown);
+            item.Correction = next;
+        }
+        // "보정 전 보기": draws every object without its correction (the data stays). Not saved.
+        public bool CorrectionsShown { get; private set; } = true;
+        public void ShowCorrections(bool shown)
+        {
+            CorrectionsShown = shown;
+            foreach (var item in objects) item.Styler?.ShowCorrection(shown);
         }
 
         // PH-04: strength of one physics part for a character (0..1). Instant, no re-bake.

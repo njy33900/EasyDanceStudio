@@ -79,6 +79,8 @@ namespace MmdStudio.Poc
                 if (physics.enabled && item.Motion != null) Scene.SetPhysics(id, true);
                 if (!string.IsNullOrEmpty(physics.spring) && item.Motion != null && item.SpringAvailable) Scene.SetSpring(id, physics.spring);
                 if (data.material != null && data.material.style != MaterialStyleData.Original) ApplyStoredMaterial(id, data.material, null);
+                // A relinked (possibly edited) model: entries that no longer match stay unapplied, with the reason in the inspector.
+                if (data.correction != null && !data.correction.IsNeutral) ApplyStoredCorrection(id, data.correction, null);
                 Push(new RelinkCommand { Label = "파일 다시 연결", ObjectId = id, Item = item, Index = index, Missing = missing, MotionMissing = motionMissing });
                 SelectedId = id; Target = InspectorTarget.Object;
                 message = "다시 연결했습니다: " + Path.GetFileName(pmx) + (motionMissing != null ? " · VMD는 아직 누락입니다." : "");

@@ -17,6 +17,7 @@ namespace MmdStudio.Poc
         public string name;
         public Vector3 pivot;
         public float yaw, pitch, distance, fieldOfView;
+        public float roll; // v0.61 (additive): screen tilt
     }
 
     // MVP-06: camera/light/effects/background state (MMD-108..110). Plain serializable
@@ -52,7 +53,7 @@ namespace MmdStudio.Poc
         public SceneGraphicsSettings Clone()
         {
             var copy = (SceneGraphicsSettings)MemberwiseClone();
-            copy.savedViews = savedViews.Select(view => new SavedView { name = view.name, pivot = view.pivot, yaw = view.yaw, pitch = view.pitch, distance = view.distance, fieldOfView = view.fieldOfView }).ToList();
+            copy.savedViews = savedViews.Select(view => new SavedView { name = view.name, pivot = view.pivot, yaw = view.yaw, pitch = view.pitch, distance = view.distance, fieldOfView = view.fieldOfView, roll = view.roll }).ToList();
             return copy;
         }
 
@@ -77,7 +78,7 @@ namespace MmdStudio.Poc
             foreach (var view in savedViews)
             {
                 if (view == null) throw new ArgumentNullException(nameof(savedViews));
-                foreach (var value in new[] { view.pivot.x, view.pivot.y, view.pivot.z, view.yaw, view.pitch, view.distance })
+                foreach (var value in new[] { view.pivot.x, view.pivot.y, view.pivot.z, view.yaw, view.pitch, view.distance, view.roll })
                     if (float.IsNaN(value) || float.IsInfinity(value)) throw new ArgumentOutOfRangeException(nameof(savedViews), "저장된 시점 값이 올바르지 않습니다.");
                 Range(view.fieldOfView, 10, 120, "저장된 시점의 시야각이 올바르지 않습니다.");
             }

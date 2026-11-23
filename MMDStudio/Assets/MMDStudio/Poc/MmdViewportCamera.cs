@@ -5,27 +5,33 @@ namespace MmdStudio.Poc
 {
     // MVP-03: pivot/yaw/pitch/distance orbit camera. Pure state; the workspace
     // decides when pointer input may reach it and applies it to Camera.main.
+    // v0.61: roll (the screen tilt a camera VMD hands over; orbiting keeps it, "수평 맞추기" and
+    // view reset clear it), dolly (right drag) and zoom toward a point (wheel over a surface).
+    // None of these changes the lens: the field of view belongs to the camera settings.
     public sealed class MmdViewportCamera
     {
         public const float MinDistance = .05f, MaxDistance = 500, PitchLimit = 89;
         public const float DegreesPerPixel = .3f, ZoomPerNotch = .88f;
+        // Right drag: a drag over the whole viewport height changes the distance by e^4 (about 55x).
+        public const float DollyPerViewport = 4;
         public Vector3 Pivot { get; private set; } = new Vector3(0, 1, 0);
         public float Yaw { get; private set; } = 180;
         public float Pitch { get; private set; } = 5;
+        public float Roll { get; private set; }
         public float Distance { get; private set; } = 4;
-        public Quaternion Rotation => Quaternion.Euler(Pitch, Yaw, 0);
+        public Quaternion Rotation => Quaternion.Euler(Pitch, Yaw, Roll);
         public Vector3 Position => Pivot + Rotation * new Vector3(0, 0, -Distance);
 
         public const float DefaultYaw = 180, DefaultPitch = 5;
         public void Reset()
         {
-            Pivot = new Vector3(0, 1, 0); Yaw = DefaultYaw; Pitch = DefaultPitch; Distance = 4;
+            Pivot = new Vector3(0, 1, 0); Yaw = DefaultYaw; Pitch = DefaultPitch; Roll = 0; Distance = 4;
         }
-        public void Set(Vector3 pivot, float yaw, float pitch, float distance)
+        public void Set(Vector3 pivot, float yaw, float pitch, float distance, float roll = 0)
         {
-            if (!Finite(pivot.x) || !Finite(pivot.y) || !Finite(pivot.z) || !Finite(yaw) || !Finite(pitch) || !Finite(distance))
+            if (!Finite(pivot.x) || !Finite(pivot.y) || !Finite(pivot.z) || !Finite(yaw) || !Finite(pitch) || !Finite(distance) || !Finite(roll))
                 throw new ArgumentOutOfRangeException(nameof(pivot), "시점 값이 올바르지 않습니다.");
-            Pivot = pivot; Yaw = Mathf.Repeat(yaw, 360);
+            Pivot = pivot; Yaw = Mathf.Repeat(yaw, 360); Roll = Mathf.DeltaAngle(0, roll);
             Pitch = Mathf.Clamp(pitch, -PitchLimit, PitchLimit); Distance = Mathf.Clamp(distance, MinDistance, MaxDistance);
         }
         private static bool Finite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
@@ -35,6 +41,8 @@ namespace MmdStudio.Poc
             Yaw = Mathf.Repeat(Yaw + pixels.x * DegreesPerPixel, 360);
             Pitch = Mathf.Clamp(Pitch - pixels.y * DegreesPerPixel, -PitchLimit, PitchLimit);
         }
+        // Removes the screen tilt; the view direction stays.
+        public void Level() => Roll = 0;
         // Moves pivot and camera together so the point under the cursor follows it.
         public void Pan(Vector2 pixels, float viewportPixelHeight, float verticalFov)
         {
@@ -47,6 +55,30 @@ namespace MmdStudio.Poc
         {
             if (float.IsNaN(notches) || float.IsInfinity(notches)) return;
             Distance = Mathf.Clamp(Distance * Mathf.Pow(ZoomPerNotch, Mathf.Clamp(notches, -10, 10)), MinDistance, MaxDistance);
+        }
+        // Right drag: pointer up (positive Input System y) comes closer; the pivot stays.
+        public void Dolly(float pixels, float viewportPixelHeight)
+        {
+            if (!Finite(pixels) || viewportPixelHeight <= 0) return;
+            var factor = Mathf.Exp(-Mathf.Clamp(pixels / viewportPixelHeight, -1, 1) * DollyPerViewport);
+            Distance = Mathf.Clamp(Distance * factor, MinDistance, MaxDistance);
+        }
+        // Wheel over a surface: the camera moves along the line to `point` (its direction and the
+        // lens stay), so the point keeps its place on screen. The pivot then sits on the view axis
+        // at the point's depth, so a following orbit turns around what was zoomed at.
+        public void ZoomToward(Vector3 point, float notches)
+        {
+            if (float.IsNaN(notches) || float.IsInfinity(notches) || !Finite(point.x) || !Finite(point.y) || !Finite(point.z)) return;
+            var rotation = Rotation; var forward = rotation * Vector3.forward;
+            var position = Position;
+            var depth = Vector3.Dot(point - position, forward);
+            if (depth <= MinDistance * .5f) { Zoom(notches); return; } // behind or at the lens
+            var factor = Mathf.Pow(ZoomPerNotch, Mathf.Clamp(notches, -10, 10));
+            // The new depth of the point must stay inside the distance limits.
+            factor = Mathf.Clamp(factor, MinDistance / depth, MaxDistance / depth);
+            var next = point + (position - point) * factor;
+            Distance = Mathf.Clamp(depth * factor, MinDistance, MaxDistance);
+            Pivot = next + forward * Distance;
         }
         // Keeps the current viewing angle; fits the bounding sphere into the vertical FOV.
         public void Frame(Bounds bounds, float verticalFov, float aspect)

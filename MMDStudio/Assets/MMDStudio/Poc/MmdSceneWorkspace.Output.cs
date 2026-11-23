@@ -164,6 +164,8 @@ namespace MmdStudio.Poc
             var hidden = new List<Renderer>();
             var blends = new List<(Material material, float src, float dst)>();
             Busy = true; Exporting = true; Error = "";
+            // v0.61: output always draws the scene's screen corrections ("보정 전 보기" is a preview aid).
+            Scene.ShowCorrections(true);
             loadCancellation = new System.Threading.CancellationTokenSource();
             var token = loadCancellation.Token;
             Scene.Playing = false; Scene.AutomaticClock = false;

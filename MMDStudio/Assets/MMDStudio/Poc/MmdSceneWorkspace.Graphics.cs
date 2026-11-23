@@ -24,6 +24,10 @@ namespace MmdStudio.Poc
             var viewRow = Element(cameraSection, "eds-row-buttons");
             TextButton(viewRow, "SaveView", "현재 시점 저장", () => Guard(SaveView), "eds-button--block").style.marginRight = 6;
             TextButton(viewRow, "ResetView", "뷰 초기화", () => Guard(ResetView), "eds-button--block");
+            // v0.61: the screen tilt a camera VMD handed over, and a way to remove it.
+            var levelRow = Element(cameraSection, "eds-row-buttons"); levelRow.name = "ViewRollRow"; levelRow.style.marginTop = 6;
+            viewRollInfo = Text(levelRow, "", "eds-section-text"); viewRollInfo.name = "ViewRollInfo"; viewRollInfo.style.flexGrow = 1;
+            TextButton(levelRow, "LevelView", "수평 맞추기", () => Guard(LevelView));
             savedViewList = new VisualElement { name = "SavedViews" }; savedViewList.style.marginTop = 6; cameraSection.Add(savedViewList);
             BuildCameraMotionControls(cameraSection);
             BuildAutoCameraControls(cameraSection);
@@ -174,7 +178,7 @@ namespace MmdStudio.Poc
             var next = Graphics.Settings;
             if (next.savedViews.Count >= SceneGraphicsSettings.MaxSavedViews) throw new InvalidOperationException("시점은 최대 " + SceneGraphicsSettings.MaxSavedViews + "개까지 저장할 수 있습니다.");
             savedViewCounter = Math.Max(savedViewCounter, next.savedViews.Count) + 1;
-            next.savedViews.Add(new SavedView { name = "시점 " + savedViewCounter, pivot = View.Pivot, yaw = View.Yaw, pitch = View.Pitch, distance = View.Distance, fieldOfView = Camera.main.fieldOfView });
+            next.savedViews.Add(new SavedView { name = "시점 " + savedViewCounter, pivot = View.Pivot, yaw = View.Yaw, pitch = View.Pitch, distance = View.Distance, fieldOfView = Camera.main.fieldOfView, roll = View.Roll });
             Record("시점 저장", null, () => Graphics.Apply(next)); message = "현재 시점을 저장했습니다.";
         }
         internal void RestoreView(int index)
@@ -183,7 +187,7 @@ namespace MmdStudio.Poc
             if (index < 0 || index >= next.savedViews.Count) throw new ArgumentOutOfRangeException(nameof(index), "저장된 시점을 찾을 수 없습니다.");
             var view = next.savedViews[index];
             ReleaseCameraMotion();
-            View.Set(view.pivot, view.yaw, view.pitch, view.distance);
+            View.Set(view.pivot, view.yaw, view.pitch, view.distance, view.roll);
             next.fieldOfView = view.fieldOfView; Graphics.Apply(next);
             View.Apply(Camera.main); message = view.name + "(으)로 이동했습니다.";
         }
@@ -197,6 +201,21 @@ namespace MmdStudio.Poc
         {
             ReleaseCameraMotion();
             View.Reset(); FrameAll(); View.Apply(Camera.main); message = "뷰를 초기화했습니다.";
+        }
+        private Label viewRollInfo;
+        private void LevelView()
+        {
+            ReleaseCameraMotion();
+            View.Level(); View.Apply(Camera.main); message = "화면 기울기를 없앴습니다.";
+        }
+        // Shown while the manual view has a tilt (a camera VMD handed it over).
+        private void RefreshViewRoll()
+        {
+            if (viewRollInfo == null) return;
+            var row = viewRollInfo.parent;
+            var tilted = !CameraFollowing && Mathf.Abs(View.Roll) > .05f;
+            Show(row, tilted);
+            if (tilted) viewRollInfo.text = "화면 기울기 " + View.Roll.ToString("0.0") + "°";
         }
         private void RefreshGraphics()
         {
@@ -212,6 +231,7 @@ namespace MmdStudio.Poc
                 TextButton(row, "view-delete-" + i, "삭제", () => Guard(() => DeleteView(index)), "eds-button--danger");
             }
             cameraSection.SetEnabled(!Busy); lightSection.SetEnabled(!Busy); graphicsSection.SetEnabled(!Busy);
+            RefreshViewRoll();
         }
     }
 }

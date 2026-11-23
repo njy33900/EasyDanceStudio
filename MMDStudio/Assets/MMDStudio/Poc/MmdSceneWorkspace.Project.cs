@@ -153,7 +153,7 @@ namespace MmdStudio.Poc
                 projectId = projectId,
                 selectedId = SelectedId,
                 graphics = Graphics.Settings,
-                view = new ViewData { pivot = View.Pivot, yaw = View.Yaw, pitch = View.Pitch, distance = View.Distance },
+                view = new ViewData { pivot = View.Pivot, yaw = View.Yaw, pitch = View.Pitch, distance = View.Distance, roll = View.Roll },
                 timeline = new TimelineData { timeSeconds = Scene.Seconds, loop = Scene.Loop, speed = Scene.Speed },
                 audio = CaptureAudio(sceneFile),
                 cameraMotion = CaptureCameraMotion(sceneFile),
@@ -176,6 +176,7 @@ namespace MmdStudio.Poc
                         strength = item.PhysicsStrength.Select(entry => new PartStrength { part = entry.Key, value = entry.Value }).ToList(),
                     },
                     material = item.MaterialStyle.Clone(),
+                    correction = item.Correction.Clone(),
                 };
             }
             SceneObjectData Missing(UnresolvedItem item)
@@ -204,7 +205,7 @@ namespace MmdStudio.Poc
         private void NewScene()
         {
             if (Busy) return;
-            Scene.Clear(); Scene.Loop = false; Scene.Speed = 1; ClearDocumentState();
+            Scene.Clear(); Scene.Loop = false; Scene.Speed = 1; ClearDocumentState(); Scene.ShowCorrections(true);
             ClearHistory(); ResetAudio(null, null, 1, false); ResetCameraMotion(null, null, false); SetOutput(new OutputData());
             Graphics.Apply(new SceneGraphicsSettings());
             View.Reset(); View.Apply(Camera.main);
@@ -327,7 +328,7 @@ namespace MmdStudio.Poc
                         audio.Track?.Dispose();
                         throw;
                     }
-                    ClearDocumentState();
+                    ClearDocumentState(); Scene.ShowCorrections(true);
                     documentOrder.AddRange(order);
                     foreach (var entry in pendingUnresolved) unresolved[entry.Key] = entry.Value;
                     foreach (var entry in pendingMotions) unresolvedMotions[entry.Key] = entry.Value;
@@ -342,9 +343,10 @@ namespace MmdStudio.Poc
                         if (physics.enabled && live.Motion != null) Scene.SetPhysics(live.Id, true);
                         if (!string.IsNullOrEmpty(physics.spring) && live.Motion != null && live.SpringAvailable) Scene.SetSpring(live.Id, physics.spring);
                         if (data.material != null && data.material.style != MaterialStyleData.Original) ApplyStoredMaterial(live.Id, data.material, problems);
+                        if (data.correction != null && !data.correction.IsNeutral) ApplyStoredCorrection(live.Id, data.correction, problems);
                     }
                     Graphics.Apply(file.graphics);
-                    View.Set(file.view.pivot, file.view.yaw, file.view.pitch, file.view.distance); View.Apply(Camera.main);
+                    View.Set(file.view.pivot, file.view.yaw, file.view.pitch, file.view.distance, file.view.roll); View.Apply(Camera.main);
                     ClearHistory();
                     ResetAudio(audio.Track, audio.Missing, file.audio.volume, file.audio.muted);
                     ResetCameraMotion(cameraMotion.Motion, cameraMotion.Missing, file.cameraMotion.follow);

@@ -187,3 +187,12 @@
 .eds-recent-remove { width: 28px; height: 28px; margin: 0 0 0 4px; padding: 0; border-width: 0; border-radius: 6px; background-color: rgba(0, 0, 0, 0);
     color: #71717A; font-size: 15px; }
 .eds-recent-remove:hover { background-color: #F4F4F5; color: #18181B; }
+
+/* ---------- v0.61 screen correction ---------- */
+.eds-button--toggled, .eds-button--toggled:focus, .eds-button--toggled:hover { background-color: #FEF3C7; border-color: #F59E0B; color: #92400E; }
+.eds-compare-chip { position: absolute; top: 76px; left: 50%; translate: -50% 0; padding: 4px 12px; background-color: rgba(254, 243, 199, 0.95);
+    border-width: 1px; border-color: #F59E0B; border-radius: 10px; color: #92400E; font-size: 12px; }
+.eds-correction-materials { margin-top: 8px; }
+.eds-correction-materials .unity-foldout__text { font-size: 12px; color: #3F3F46; }
+.eds-correction-materials > .unity-foldout__content { margin-left: 0; }
+.eds-correction-problem { font-size: 11px; color: #B45309; white-space: normal; margin-top: 4px; }

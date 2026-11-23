@@ -55,7 +55,7 @@ namespace MmdStudio.Poc
                 SetCameraFollow(evt.newValue);
                 message = evt.newValue ? "카메라 모션을 따라갑니다." : "수동 카메라로 전환했습니다.";
             }));
-            Text(section, "뷰포트에서 카메라를 움직이면(회전·이동·확대·맞춤·뷰 초기화) 수동 카메라가 우선하고 모션은 해제됩니다. 모션은 장면에 남아 있어 '따라가기'로 다시 연결합니다. 모델 추적·직교 투영은 지원하지 않습니다.", "eds-note").name = "CameraMotionNote";
+            Text(section, "뷰포트에서 카메라를 실제로 움직이면(회전·이동·확대·맞춤·뷰 초기화) 수동 카메라가 우선하고 모션은 해제됩니다. 누르기만 하거나 모델을 고르는 것으로는 해제되지 않습니다. 해제할 때 모션의 위치·방향·화면 기울기·시야각을 그대로 이어받습니다. 모션은 장면에 남아 있어 '따라가기'로 다시 연결합니다. 모델 추적·직교 투영은 지원하지 않습니다.", "eds-note").name = "CameraMotionNote";
         }
 
         internal void SetCameraFollow(bool follow)
@@ -75,18 +75,30 @@ namespace MmdStudio.Poc
             message = "수동 카메라로 전환했습니다. '카메라 모션 따라가기'로 다시 연결할 수 있습니다.";
             Refresh();
         }
+        // v0.61: the first manual frame shows exactly what the motion showed: position, direction,
+        // screen tilt (roll) and lens. The orbit pivot sits at the motion's own target distance.
+        // The lens becomes the camera setting (a view state like the orbit, not an undo step);
+        // only a view angle outside 10~120 degrees or a pitch beyond ±89 degrees is clamped.
         private void HandOverToManualView()
         {
             var camera = Camera.main;
             if (camera == null) return;
-            var forward = camera.transform.forward;
+            var rotation = camera.transform.rotation;
+            var forward = rotation * Vector3.forward;
             var pitch = -Mathf.Asin(Mathf.Clamp(forward.y, -1, 1)) * Mathf.Rad2Deg;
             var yaw = Mathf.Atan2(forward.x, forward.z) * Mathf.Rad2Deg;
+            var level = Quaternion.Euler(pitch, yaw, 0);
+            var roll = Vector3.SignedAngle(level * Vector3.up, rotation * Vector3.up, forward);
             var distance = Scene.CameraMotion != null ? Mathf.Abs(Scene.CameraMotion.Evaluate(Scene.Seconds).Distance) : View.Distance;
             if (distance < .5f) distance = Mathf.Max(.5f, View.Distance);
-            View.Set(camera.transform.position + forward * distance, yaw, pitch, distance);
+            View.Set(camera.transform.position + forward * distance, yaw, pitch, distance, roll);
             View.Apply(camera);
-            camera.fieldOfView = Graphics.Settings.fieldOfView;
+            var lens = Mathf.Clamp(camera.fieldOfView, 10, 120);
+            if (Mathf.Abs(Graphics.CurrentSettings.fieldOfView - lens) > 1e-4f)
+            {
+                var next = Graphics.Settings; next.fieldOfView = lens; Graphics.Apply(next);
+            }
+            camera.fieldOfView = Graphics.CurrentSettings.fieldOfView;
         }
 
         // Every frame while following (also called right after a seek or a connect).

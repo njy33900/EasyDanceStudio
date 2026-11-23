@@ -58,7 +58,8 @@ namespace MmdStudio.Poc
                 Check("graphics_settings_restored_exactly", JsonUtility.ToJson(ui.Graphics.Settings) == JsonUtility.ToJson(file.graphics) &&
                     Math.Abs(Camera.main.fieldOfView - file.graphics.fieldOfView) < 1e-3f);
                 Check("view_restored", (ui.View.Pivot - file.view.pivot).magnitude < 1e-4f && Math.Abs(Mathf.DeltaAngle(ui.View.Yaw, file.view.yaw)) < 1e-3f &&
-                    Math.Abs(ui.View.Pitch - file.view.pitch) < 1e-3f && Math.Abs(ui.View.Distance - file.view.distance) < 1e-3f);
+                    Math.Abs(ui.View.Pitch - file.view.pitch) < 1e-3f && Math.Abs(ui.View.Distance - file.view.distance) < 1e-3f &&
+                    Math.Abs(Mathf.DeltaAngle(ui.View.Roll, file.view.roll)) < 1e-3f);
                 Check("timeline_restored_paused", ui.Scene.Loop == file.timeline.loop && Math.Abs(ui.Scene.Speed - file.timeline.speed) < 1e-9 &&
                     Math.Abs(ui.Scene.Seconds - Math.Min(file.timeline.timeSeconds, ui.Scene.Duration)) < 1e-6 && !ui.Scene.Playing);
                 // H2a-03: the UI probe saves the scene with a WAV (volume 80%).
@@ -74,6 +75,13 @@ namespace MmdStudio.Poc
                     styles.All(s => JsonUtility.ToJson(s.live.MaterialStyle) == JsonUtility.ToJson(s.data.material) &&
                         (s.data.material.style == MaterialStyleData.Original || s.live.Model.root.GetComponentsInChildren<Renderer>(true).SelectMany(r => r.sharedMaterials)
                             .Any(m => m != null && m.shader.name == (s.data.material.style == MaterialStyleData.Toon ? "EasyDanceStudio/Toon" : "EasyDanceStudio/StageLit")))));
+                // v0.61: screen corrections (the UI probe leaves the first character with an object and a
+                // material correction, the stage with an object brightness) are restored and drawn.
+                var corrected = styles.Where(s => !s.data.correction.IsNeutral).ToArray();
+                Check("screen_corrections_restored_and_drawn [" + corrected.Length + " objects, " + corrected.Sum(s => s.data.correction.materials.Count) + " material entries]",
+                    corrected.Length >= 2 && corrected.Any(s => s.data.correction.materials.Count > 0) &&
+                    styles.All(s => JsonUtility.ToJson(s.live.Correction) == JsonUtility.ToJson(s.data.correction)) &&
+                    corrected.All(s => s.live.Styler != null && s.live.Styler.CorrectedSlots > 0 && s.live.Styler.Resolution.Problems.Count == 0) && ui.Scene.CorrectionsShown);
                 // H3: output settings (the UI probe saves the square preset).
                 Check("output_settings_restored", JsonUtility.ToJson(ui.Output) == JsonUtility.ToJson(file.output) && file.output.preset == OutputData.Square);
                 Check("characters_sampled_at_restored_time", ui.Scene.Objects.Where(item => item.Motion != null).All(item => Math.Abs(item.Motion.TimeSeconds - (float)ui.Scene.Seconds) < 1e-4f));

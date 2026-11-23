@@ -22,6 +22,7 @@ namespace MmdStudio.Poc
             public string spring;
             public float[] strength; // per MmdPhysicsParts.Order
             public string material;   // MaterialStyleData JSON (H2b-01)
+            public string correction; // ColorCorrectionData JSON (v0.61)
         }
         private sealed class LightState
         {
@@ -46,8 +47,8 @@ namespace MmdStudio.Poc
         private sealed class StateCommand : UndoCommand
         {
             public LightState Before, After;
-            public override void Undo(MmdSceneWorkspace w) => w.ApplyLight(Before);
-            public override void Redo(MmdSceneWorkspace w) => w.ApplyLight(After);
+            public override void Undo(MmdSceneWorkspace w) => w.ApplyLight(Before, After);
+            public override void Redo(MmdSceneWorkspace w) => w.ApplyLight(After, Before);
         }
         private sealed class AddCommand : UndoCommand
         {
@@ -118,39 +119,51 @@ namespace MmdStudio.Poc
                     visible = item.Visible, physics = item.PhysicsEnabled, spring = item.SpringPreset,
                     strength = MmdPhysicsParts.Order.Select(item.StrengthOf).ToArray(),
                     material = JsonUtility.ToJson(item.MaterialStyle),
+                    correction = JsonUtility.ToJson(item.Correction),
                 };
             return state;
         }
 
         private static bool Same(ObjectState a, ObjectState b) =>
             a.position == b.position && a.rotation == b.rotation && a.scale == b.scale && a.visible == b.visible &&
-            a.physics == b.physics && a.spring == b.spring && a.strength.SequenceEqual(b.strength) && a.material == b.material;
+            a.physics == b.physics && a.spring == b.spring && a.strength.SequenceEqual(b.strength) && a.material == b.material && a.correction == b.correction;
 
         private static bool Same(LightState a, LightState b) =>
             a.graphics == b.graphics && a.loop == b.loop && a.speed == b.speed && a.audioVolume == b.audioVolume && a.audioMuted == b.audioMuted && a.objects.Count == b.objects.Count &&
             a.objects.All(entry => b.objects.TryGetValue(entry.Key, out var other) && Same(entry.Value, other));
 
-        // Re-applies a snapshot, touching only what differs (no needless physics re-bakes).
-        private void ApplyLight(LightState target)
+        // Re-applies a snapshot, touching only what the command changed (`other` is the snapshot on
+        // its other side) and what differs now (no needless physics re-bakes). v0.61: a camera VMD
+        // handing over to the manual view sets the lens outside the history; an undo of an
+        // unrelated graphics edit keeps the current lens.
+        private void ApplyLight(LightState target, LightState other)
         {
             var current = CaptureLight();
-            if (current.graphics != target.graphics) Graphics.Apply(JsonUtility.FromJson<SceneGraphicsSettings>(target.graphics));
-            if (current.loop != target.loop) Scene.Loop = target.loop;
-            if (current.speed != target.speed) Scene.Speed = target.speed;
-            if (current.audioVolume != target.audioVolume) Scene.AudioVolume = target.audioVolume;
-            if (current.audioMuted != target.audioMuted) Scene.AudioMuted = target.audioMuted;
+            if (current.graphics != target.graphics && other.graphics != target.graphics)
+            {
+                var next = JsonUtility.FromJson<SceneGraphicsSettings>(target.graphics);
+                if (next.fieldOfView == JsonUtility.FromJson<SceneGraphicsSettings>(other.graphics).fieldOfView) next.fieldOfView = Graphics.CurrentSettings.fieldOfView;
+                Graphics.Apply(next);
+            }
+            if (current.loop != target.loop && other.loop != target.loop) Scene.Loop = target.loop;
+            if (current.speed != target.speed && other.speed != target.speed) Scene.Speed = target.speed;
+            if (current.audioVolume != target.audioVolume && other.audioVolume != target.audioVolume) Scene.AudioVolume = target.audioVolume;
+            if (current.audioMuted != target.audioMuted && other.audioMuted != target.audioMuted) Scene.AudioMuted = target.audioMuted;
             foreach (var entry in target.objects)
             {
                 if (!current.objects.TryGetValue(entry.Key, out var now)) continue;
                 var want = entry.Value;
-                if (now.position != want.position || now.rotation != want.rotation || now.scale != want.scale)
+                if (!other.objects.TryGetValue(entry.Key, out var was)) was = new ObjectState { strength = new float[MmdPhysicsParts.Order.Length] };
+                if ((now.position != want.position || now.rotation != want.rotation || now.scale != want.scale) &&
+                    (was.position != want.position || was.rotation != want.rotation || was.scale != want.scale))
                     Scene.SetPlacement(entry.Key, want.position, want.rotation, want.scale);
-                if (now.visible != want.visible) Scene.SetVisible(entry.Key, want.visible);
+                if (now.visible != want.visible && was.visible != want.visible) Scene.SetVisible(entry.Key, want.visible);
                 for (var i = 0; i < MmdPhysicsParts.Order.Length; i++)
-                    if (now.strength[i] != want.strength[i]) Scene.SetPhysicsStrength(entry.Key, MmdPhysicsParts.Order[i], want.strength[i]);
-                if (now.physics != want.physics) Scene.SetPhysics(entry.Key, want.physics);
-                if (now.spring != want.spring) Scene.SetSpring(entry.Key, want.spring);
-                if (now.material != want.material) Scene.SetMaterialStyle(entry.Key, JsonUtility.FromJson<MaterialStyleData>(want.material));
+                    if (now.strength[i] != want.strength[i] && was.strength[i] != want.strength[i]) Scene.SetPhysicsStrength(entry.Key, MmdPhysicsParts.Order[i], want.strength[i]);
+                if (now.physics != want.physics && was.physics != want.physics) Scene.SetPhysics(entry.Key, want.physics);
+                if (now.spring != want.spring && was.spring != want.spring) Scene.SetSpring(entry.Key, want.spring);
+                if (now.material != want.material && was.material != want.material) Scene.SetMaterialStyle(entry.Key, JsonUtility.FromJson<MaterialStyleData>(want.material));
+                if (now.correction != want.correction && was.correction != want.correction) Scene.SetCorrection(entry.Key, JsonUtility.FromJson<ColorCorrectionData>(want.correction));
             }
         }
 
