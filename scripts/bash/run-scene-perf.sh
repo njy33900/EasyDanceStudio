@@ -31,11 +31,14 @@ if 'effects_on_shadows_medium' in ps:
   if 'effects_on_screen_corrections_all_objects' in ps:
     x = ps['effects_on_screen_corrections_all_objects']; print('  v0.61 screen corrections on all objects: median %.2f ms vs %.2f ms (%+.0f%%), p95 %.2f' % (x['medianFrameMs'], base, (x['medianFrameMs']/base-1)*100, x['p95FrameMs']))
 rc={x['name']:x['msPerRender'] for x in r.get('renderCosts') or []}
-for n,v in rc.items(): print('  render 1920x1080 %-40s %6.2f ms' % (n, v))
+for x in r.get('renderCosts') or []: print('  render 1920x1080 %-46s %6.2f ms (spread %.2f)' % (x['name'], x['msPerRender'], x.get('spreadMs', 0)))
 if 'reference_bloom_tonemap_shadows_medium' in rc:
   base=rc['reference_bloom_tonemap_shadows_medium']
   for n in ['plus_dof_ssao_vignette','plus_dof_ssao_vignette_high','plus_dof_ssao_vignette_low','reference_with_screen_corrections_all_objects'] + [k for k in rc if k.startswith('look_')]:
     if n in rc: print('  decision 9 (render cost): %s %+.0f%% vs reference (limit +50%%)' % (n, (rc[n]/base-1)*100))
+  for n in [k for k in rc if k.startswith('reference_plus_')]: print('  look breakdown: %s %+.2f ms (%+.0f%%) vs reference' % (n, rc[n]-base, (rc[n]/base-1)*100))
+  if 'look_1_evening_outdoor' in rc:
+    for n in [k for k in rc if k.startswith('look_1_minus_')]: print('  look breakdown: %s saves %.2f ms of look_1 (%.2f ms)' % (n, rc['look_1_evening_outdoor']-rc[n], rc['look_1_evening_outdoor']))
 if r.get('exportFrames'): print('  export 1080p60 MP4: %d frames in %.1f s (%.1f frames/s), %s, audio %s, %.1f MB' % (r['exportFrames'], r['exportSeconds'], r['exportFramesPerSecond'], r['exportCodec'], r['exportAudio'], r['exportBytes']/2**20))
 elif r.get('exportError'): print('  export failed:', r['exportError'])
 print('memory MB: allocated %.0f reserved %.0f mono %.0f workingset %.0f' % (r['allocatedBytes']/2**20, r['reservedBytes']/2**20, r['monoUsedBytes']/2**20, r['workingSetBytes']/2**20))

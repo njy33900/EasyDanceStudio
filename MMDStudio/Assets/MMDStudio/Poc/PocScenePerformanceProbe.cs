@@ -36,7 +36,8 @@ namespace MmdStudio.Poc
         {
             public string name;
             public int renders;
-            public float msPerRender;
+            public float msPerRender;   // the lowest of the kept rounds
+            public float spreadMs;      // highest minus lowest of the kept rounds (measurement noise)
         }
         [Serializable] private sealed class Report
         {
@@ -176,31 +177,59 @@ namespace MmdStudio.Poc
             yield return Measure("effects_on_dof_ssao_vignette_high", 2, 15, passes);
             // Render cost per frame (paused, same frame): reference look, + DOF/SSAO/vignette, high quality, all off.
             ui.Scene.Playing = false;
-            var costs = new List<RenderCost>();
             var reference = ui.Graphics.Settings; reference.dofEnabled = false; reference.ssaoEnabled = false; reference.vignetteEnabled = false; reference.effectQuality = MmdEffectQuality.Medium;
             var bare = reference.Clone(); bare.bloomEnabled = false; bare.tonemapping = false; bare.shadowQuality = MmdShadowQuality.Off;
-            // Two rounds; only the second is kept (the first allocates targets and warms shaders).
-            for (var round = 0; round < 2; round++)
+            var focus = ui.Scene.Objects.First().Id;
+            SceneGraphicsSettings Variant(SceneGraphicsSettings from, Action<SceneGraphicsSettings> change) { var next = from.Clone(); change(next); if (next.dofEnabled) next.dofTarget = focus; return next; }
+            SceneGraphicsSettings Look(int i) => Variant(reference, s => MmdLookPresets.CopyLook(MmdLookPresets.BuiltIn[i].values, s));
+            // Three rounds; the first only allocates targets and warms shaders. Sub-millisecond
+            // renders vary with GPU clocks, so the lower of the two kept rounds is reported, with
+            // the spread between them.
+            var costRounds = new Dictionary<string, List<float>>(); var costOrder = new List<string>();
+            for (var round = 0; round < 3; round++)
             {
-                costs.Clear();
-                ui.Graphics.Apply(reference); costs.Add(MeasureRender("reference_bloom_tonemap_shadows_medium"));
+                void Cost(string name, SceneGraphicsSettings settings)
+                {
+                    ui.Graphics.Apply(settings);
+                    var cost = MeasureRender(name);
+                    if (round == 0) return;
+                    if (!costRounds.TryGetValue(name, out var list)) { costRounds[name] = list = new List<float>(); costOrder.Add(name); }
+                    list.Add(cost.msPerRender);
+                }
+                Cost("reference_bloom_tonemap_shadows_medium", reference);
                 // v0.61: the same frame with a screen correction on every object.
                 foreach (var item in ui.Scene.Objects) ui.Scene.SetCorrection(item.Id, Corrected(item));
-                costs.Add(MeasureRender("reference_with_screen_corrections_all_objects"));
+                Cost("reference_with_screen_corrections_all_objects", reference);
                 foreach (var item in ui.Scene.Objects) ui.Scene.SetCorrection(item.Id, new ColorCorrectionData());
-                rich.effectQuality = MmdEffectQuality.Medium; ui.Graphics.Apply(rich); costs.Add(MeasureRender("plus_dof_ssao_vignette"));
-                rich.effectQuality = MmdEffectQuality.High; ui.Graphics.Apply(rich); costs.Add(MeasureRender("plus_dof_ssao_vignette_high"));
-                rich.effectQuality = MmdEffectQuality.Low; ui.Graphics.Apply(rich); costs.Add(MeasureRender("plus_dof_ssao_vignette_low"));
-                ui.Graphics.Apply(bare); costs.Add(MeasureRender("all_effects_off_shadows_off"));
+                Cost("plus_dof_ssao_vignette", Variant(rich, s => s.effectQuality = MmdEffectQuality.Medium));
+                Cost("plus_dof_ssao_vignette_high", Variant(rich, s => s.effectQuality = MmdEffectQuality.High));
+                Cost("plus_dof_ssao_vignette_low", Variant(rich, s => s.effectQuality = MmdEffectQuality.Low));
+                Cost("all_effects_off_shadows_off", bare);
                 // H2a-05: each built-in look preset on the reference scene.
                 for (var i = 0; i < MmdLookPresets.BuiltIn.Length; i++)
-                {
-                    var look = reference.Clone(); MmdLookPresets.CopyLook(MmdLookPresets.BuiltIn[i].values, look);
-                    if (look.dofEnabled) look.dofTarget = ui.Scene.Objects.First().Id;
-                    ui.Graphics.Apply(look); costs.Add(MeasureRender("look_" + i + "_" + new[] { "bright_stage", "evening_outdoor", "dark_club" }[Math.Min(i, 2)]));
-                }
+                    Cost("look_" + i + "_" + new[] { "bright_stage", "evening_outdoor", "dark_club" }[Math.Min(i, 2)], Look(i));
+                // What a look costs, feature by feature: each one added to the reference alone, and
+                // each one taken out of the heaviest look (evening outdoor: high shadows, SSAO, DOF, vignette).
+                var evening = MmdLookPresets.BuiltIn[Math.Min(1, MmdLookPresets.BuiltIn.Length - 1)].values;
+                Cost("reference_plus_shadows_high", Variant(reference, s => s.shadowQuality = MmdShadowQuality.High));
+                Cost("reference_plus_ssao", Variant(reference, s => { s.ssaoEnabled = true; s.ssaoIntensity = evening.ssaoIntensity; s.ssaoRadius = evening.ssaoRadius; }));
+                Cost("reference_plus_dof", Variant(reference, s => { s.dofEnabled = true; s.dofStrength = evening.dofStrength; }));
+                Cost("reference_plus_vignette", Variant(reference, s => { s.vignetteEnabled = true; s.vignetteIntensity = evening.vignetteIntensity; }));
+                Cost("look_1_minus_shadows_high", Variant(Look(1), s => s.shadowQuality = MmdShadowQuality.Medium));
+                Cost("look_1_minus_ssao", Variant(Look(1), s => s.ssaoEnabled = false));
+                Cost("look_1_minus_dof", Variant(Look(1), s => s.dofEnabled = false));
+                Cost("look_1_minus_vignette", Variant(Look(1), s => s.vignetteEnabled = false));
+                // The look as the app applies it: the preset also turns the characters toon (two passes, outline).
+                var characters = ui.Scene.Objects.Where(o => o.Kind == MmdSceneService.ObjectKind.Character).ToArray();
+                foreach (var item in characters) ui.Scene.SetMaterialStyle(item.Id, new MaterialStyleData { style = MaterialStyleData.Toon });
+                Cost("look_1_with_toon_characters", Look(1));
+                Cost("reference_with_toon_characters", reference);
+                foreach (var item in characters) ui.Scene.SetMaterialStyle(item.Id, new MaterialStyleData());
             }
-            report.renderCosts = costs.ToArray();
+            report.renderCosts = costOrder.Select(name => new RenderCost
+            {
+                name = name, renders = 120, msPerRender = costRounds[name].Min(), spreadMs = costRounds[name].Max() - costRounds[name].Min(),
+            }).ToArray();
             ui.Graphics.Apply(reference);
             ui.Scene.Playing = true;
             var plain = ui.Graphics.Settings; plain.bloomEnabled = false; plain.tonemapping = false; plain.shadowQuality = MmdShadowQuality.Off;
