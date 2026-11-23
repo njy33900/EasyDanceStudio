@@ -214,6 +214,9 @@ namespace MmdStudio.Poc
                 ViewportChecks(ui, a, b);
             }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            string deviceError = null;
+            yield return DeviceInputChecks(ui, a, b, error => deviceError = error);
+            if (deviceError != null) { Finish(path, report, deviceError); yield break; }
             yield return ui.ApplyPickerResult(invalid, true);
             try { Check("bad_import_reports_error_without_losing_selection", ui.Error.Length > 0 && ui.Scene.Objects.Count == 2 && ui.SelectedId == a.Id); }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
@@ -1040,6 +1043,8 @@ namespace MmdStudio.Poc
             if (outputError != null) { Finish(path, report, outputError); yield break; }
             string correctionError = null;
             yield return CorrectionOutputChecks(ui, path, error => correctionError = error);
+            if (correctionError != null) { Finish(path, report, correctionError); yield break; }
+            yield return CorrectionScreenshots(ui, path, error => correctionError = error);
             if (correctionError != null) { Finish(path, report, correctionError); yield break; }
             string autoError = null;
             yield return AutoCameraChecks(ui, path, error => autoError = error);
@@ -1955,6 +1960,160 @@ namespace MmdStudio.Poc
             var texture = new Texture2D(width, height, TextureFormat.RGBA32, false);
             try { texture.SetPixels32(pixels); texture.Apply(); File.WriteAllBytes(file, texture.EncodeToPNG()); }
             finally { Destroy(texture); }
+        }
+
+        // The inspector's 화면 보정 section on the corrected character, after and before (for review).
+        private IEnumerator CorrectionScreenshots(MmdSceneWorkspace ui, string path, Action<string> fail)
+        {
+            var dir = Path.GetDirectoryName(path);
+            var after = Path.Combine(dir, "scene-ui-correction.png"); var before = Path.Combine(dir, "scene-ui-correction-before.png");
+            var previousTarget = ui.Target; var previousId = ui.SelectedId;
+            var previousView = (ui.View.Pivot, ui.View.Yaw, ui.View.Pitch, ui.View.Distance, ui.View.Roll);
+            try
+            {
+                foreach (var file in new[] { after, before }) if (File.Exists(file)) File.Delete(file);
+                var item = ui.Scene.Objects.FirstOrDefault(o => o.Kind == MmdSceneService.ObjectKind.Character && o.Correction.materials.Count > 0);
+                if (item == null) throw new InvalidOperationException("No character with a material correction for the screenshot");
+                ui.FrameIds(item.Id); ui.Select(item.Id);
+                ui.Root.Q<Foldout>("CorrectionMaterials").value = true;
+                if (correctionTestMaterial >= 0) ui.ChooseCorrectionMaterial(correctionTestMaterial);
+            }
+            catch (Exception ex) { fail(ex.ToString()); yield break; }
+            yield return null; yield return null; // layout, then scroll the section into view
+            try
+            {
+                // The section's top (status, compare button) at the top of the inspector.
+                var scroll = ui.Root.Q<ScrollView>("InspectorContent");
+                scroll.scrollOffset = new Vector2(0, ui.Root.Q("CorrectionSection").layout.y);
+            }
+            catch (Exception ex) { fail(ex.ToString()); yield break; }
+            yield return null;
+            ScreenCapture.CaptureScreenshot(after);
+            yield return new WaitForSecondsRealtime(.3f);
+            try { Activate(ui.Root, "CorrectionCompare"); } // the button (it also refreshes the inspector and the chip)
+            catch (Exception ex) { fail(ex.ToString()); yield break; }
+            yield return null;
+            ScreenCapture.CaptureScreenshot(before);
+            yield return new WaitForSecondsRealtime(.3f);
+            try
+            {
+                var chipShown = ui.Root.Q<Label>("CorrectionCompareChip").resolvedStyle.display == DisplayStyle.Flex;
+                Activate(ui.Root, "CorrectionCompare");
+                Check("correction_inspector_screenshots_created", File.Exists(after) && File.Exists(before) && chipShown && ui.Scene.CorrectionsShown);
+                ui.View.Set(previousView.Pivot, previousView.Yaw, previousView.Pitch, previousView.Distance, previousView.Roll); ui.View.Apply(Camera.main);
+                if (previousTarget != MmdSceneWorkspace.InspectorTarget.Object) ui.SelectTarget(previousTarget);
+                else if (previousId != null && ui.Scene.Objects.Any(o => o.Id == previousId)) ui.Select(previousId);
+            }
+            catch (Exception ex) { fail(ex.ToString()); }
+        }
+
+        // ----- v0.61 mouse through the Input System device layer -----
+        // The other viewport checks call the router directly. Here a virtual mouse and keyboard get
+        // Input System state events and the workspace reads them in its own Update (ReadDevices),
+        // one frame per step: button bits, position and delta, wheel units and Shift.
+        private IEnumerator DeviceInputChecks(MmdSceneWorkspace ui, MmdSceneService.SceneObject a, MmdSceneService.SceneObject b, Action<string> fail)
+        {
+            // Without focus the workspace ignores device input by design (a drag ends on focus loss).
+            if (!Application.isFocused) { checks.Add("device_input_checks_skipped_window_not_focused"); yield break; }
+            UnityEngine.InputSystem.Mouse mouse = null; UnityEngine.InputSystem.Keyboard keyboard = null;
+            var state = new UnityEngine.InputSystem.LowLevel.MouseState();
+            var view = ui.View; var at = Vector2.zero;
+            void Send(Vector2 position, bool left = false, bool right = false, float scroll = 0)
+            {
+                state.delta = position - at; state.position = position; at = position; state.buttons = 0;
+                if (left) state = state.WithButton(UnityEngine.InputSystem.LowLevel.MouseButton.Left);
+                if (right) state = state.WithButton(UnityEngine.InputSystem.LowLevel.MouseButton.Right);
+                state.scroll = new Vector2(0, scroll);
+                mouse.MakeCurrent(); keyboard.MakeCurrent();
+                UnityEngine.InputSystem.InputSystem.QueueStateEvent(mouse, state);
+            }
+            void Keys(params UnityEngine.InputSystem.Key[] held)
+            {
+                keyboard.MakeCurrent();
+                UnityEngine.InputSystem.InputSystem.QueueStateEvent(keyboard, new UnityEngine.InputSystem.LowLevel.KeyboardState(held));
+            }
+            var rect = Camera.main.pixelRect;
+            Vector2 aPoint = default, bPoint = default, centre = default, empty = default;
+            var results = new List<string>(); var ok = true;
+            void Result(string name, bool passed) { results.Add(name + "=" + passed); ok &= passed; }
+            try
+            {
+                mouse = UnityEngine.InputSystem.InputSystem.AddDevice<UnityEngine.InputSystem.Mouse>("ProbeMouse");
+                keyboard = UnityEngine.InputSystem.InputSystem.AddDevice<UnityEngine.InputSystem.Keyboard>("ProbeKeyboard");
+                Activate(ui.Root, "FrameAll");
+                Activate(ui.Root, "object-" + a.Id);
+                Vector2 On(MmdSceneService.SceneObject item)
+                {
+                    MmdSceneWorkspace.TryBounds(new[] { item }, out var bounds);
+                    foreach (var world in new[] { BodyPoint(item), bounds.center, bounds.center + Vector3.up * .3f })
+                    {
+                        var screen = Camera.main.WorldToScreenPoint(world); var point = new Vector2(screen.x, screen.y);
+                        if (screen.z > 0 && ui.RaycastScene(point).Item == item && ui.GizmoHandleAt(point) < 0) return point;
+                    }
+                    throw new InvalidOperationException("No free point on " + Path.GetFileNameWithoutExtension(item.ModelSource));
+                }
+                bPoint = On(b); aPoint = On(a);
+                centre = rect.center; for (var i = 0; i < 10 && ui.GizmoHandleAt(centre) >= 0; i++) centre += new Vector2(0, 40);
+                var corner = new[] { new Vector2(rect.xMin + 8, rect.yMax - 8), new Vector2(rect.xMax - 8, rect.yMax - 8), new Vector2(rect.xMin + 8, rect.yMin + 30) }
+                    .Where(p => ui.PointerInViewport(p) && ui.RaycastScene(p).Item == null).ToArray();
+                if (corner.Length == 0) throw new InvalidOperationException("No empty viewport point for the device wheel step");
+                empty = corner[0];
+                at = bPoint; Send(bPoint); Keys();
+                ui.DeviceInput = true;
+            }
+            catch (Exception ex) { ui.DeviceInput = false; fail(ex.ToString()); yield break; }
+            yield return null;
+            // 1. A click (press and release on the same spot) selects the character under the cursor.
+            Send(bPoint, left: true); yield return null;
+            Send(bPoint); yield return null;
+            Result("click_selects", ui.SelectedId == b.Id);
+            // 2. A left drag that starts on the other character orbits, catching up past the slop; the selection stays.
+            var before = (view.Yaw, view.Pitch, view.Distance, view.Pivot);
+            if (ui.GizmoHandleAt(aPoint) >= 0) { ui.DeviceInput = false; fail("device drag would start on the gizmo"); yield break; }
+            Send(aPoint); yield return null;
+            Send(aPoint, left: true); yield return null;
+            Send(aPoint + new Vector2(3, 0), left: true); yield return null;
+            var still = (view.Yaw, view.Pitch, view.Distance, view.Pivot) == before;
+            Send(aPoint + new Vector2(12, 0), left: true); yield return null;
+            Send(aPoint + new Vector2(24, 0), left: true); yield return null;
+            Send(aPoint + new Vector2(24, 0)); yield return null;
+            Result("left_drag_orbits_keeping_selection", still && Near(view.Yaw, Mathf.Repeat(before.Yaw + 24 * MmdViewportCamera.DegreesPerPixel, 360), .01f) &&
+                Near(view.Distance, before.Distance) && ui.SelectedId == b.Id);
+            // 3. Right drag up comes closer by the dolly rate; the pivot and the lens stay.
+            var distance = view.Distance; var pivot = view.Pivot; var fov = Camera.main.fieldOfView;
+            Send(centre); yield return null;
+            Send(centre, right: true); yield return null;
+            Send(centre + new Vector2(0, 60), right: true); yield return null;
+            Send(centre + new Vector2(0, 60)); yield return null;
+            Result("right_drag_dollies", Near(view.Distance, distance * Mathf.Exp(-60f / Camera.main.pixelHeight * MmdViewportCamera.DollyPerViewport)) &&
+                Near(view.Pivot, pivot) && Camera.main.fieldOfView == fov);
+            // 4. Shift + right drag pans: pivot and camera move together, distance and angles stay.
+            distance = view.Distance; pivot = view.Pivot; var yaw = view.Yaw;
+            Keys(UnityEngine.InputSystem.Key.LeftShift); Send(centre); yield return null;
+            Send(centre, right: true); yield return null;
+            Send(centre + new Vector2(30, 15), right: true); yield return null;
+            Send(centre + new Vector2(30, 15)); Keys(); yield return null;
+            Result("shift_right_drag_pans", (view.Pivot - pivot).magnitude > 1e-4f && Near(view.Distance, distance) && Near(view.Yaw, yaw));
+            // 5. One wheel notch (Windows reports 120 units) over empty space: toward the pivot.
+            distance = view.Distance; pivot = view.Pivot;
+            Send(empty); yield return null;
+            Send(empty, scroll: 120); yield return null;
+            Send(empty); yield return null;
+            Result("wheel_notch_zooms", Near(view.Distance, distance * MmdViewportCamera.ZoomPerNotch) && Near(view.Pivot, pivot) && !ui.LastZoomHitSurface);
+            // 6. F frames the selected character.
+            Keys(UnityEngine.InputSystem.Key.F); yield return null;
+            Keys(); yield return null;
+            MmdSceneWorkspace.TryBounds(new[] { b }, out var bBounds);
+            Result("f_frames_selection", ui.SafeViewportRect().Contains((Vector2)Camera.main.WorldToScreenPoint(bBounds.center)) && CameraMatchesView(ui));
+            try
+            {
+                ui.DeviceInput = false;
+                UnityEngine.InputSystem.InputSystem.RemoveDevice(mouse); UnityEngine.InputSystem.InputSystem.RemoveDevice(keyboard);
+                Activate(ui.Root, "FrameAll");
+                Activate(ui.Root, "object-" + a.Id); // the next check expects the first character selected
+                Check("device_level_mouse_and_keys_follow_v061_rules [" + string.Join(" ", results) + "]", ok);
+            }
+            catch (Exception ex) { fail(ex.ToString()); }
         }
 
         // ----- H3 output -----
