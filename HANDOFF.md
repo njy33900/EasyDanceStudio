@@ -2,7 +2,7 @@
 
 기준일: **2026-11-19 (한국 시간)**. 사용자가 Codex에서 진행하던 작업을 Claude로 이어서 진행하도록 요청하여 작성한 현재 상태 요약이다. 같은 날 Claude가 MVP-03(뷰포트 조작·선택 강조), MVP-04(PMX 배경), MVP-05(뷰포트 클릭 선택·단축키·삭제 확인), MVP-06(카메라·조명·기본 그래픽), MVP-07(`.mmdscene` 저장/복원), MVP-08(밝은 미니멀 UI 재디자인), MVP-09(통합·성능 보고서·알려진 문제), MVP-10(W/E/R 변형 기즈모)을 구현·검증하고 이 문서를 갱신했다. **1차 MVP 기능은 기즈모까지 구현·자동 검증 완료, 사람의 수동 확인·클린 PC·중급 PC 측정이 남았다.**
 
-> **최신 인계는 [docs/handoff/](docs/handoff/README.md) 폴더를 먼저 본다** (현재: `2026-11-23_v0.61-impl_to_player-verify.md`). 이 파일은 전체 배경과 이력이다.
+> **최신 인계는 [docs/handoff/](docs/handoff/README.md) 폴더를 먼저 본다** (현재: `2026-11-23_v0.61-autorun_to_review.md`). 이 파일은 전체 배경과 이력이다.
 >
 > **Codex 검토 요청과 다음 스텝 후보는 [REVIEW_FOR_CODEX.md](REVIEW_FOR_CODEX.md)에 정리했다.** 이 문서는 현재 상태 기준이다.
 >
