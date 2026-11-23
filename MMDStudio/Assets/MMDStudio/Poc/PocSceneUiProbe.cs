@@ -1843,6 +1843,35 @@ namespace MmdStudio.Poc
                 ui.Root.Q<Label>("CorrectionSupport").text.Contains("광택 ×");
             Check("gloss_marked_unsupported_on_original_style", unlit);
 
+            // The original (unlit) style takes the per-material colour too (its _BaseColor): on the
+            // other model, its best-lit material only. Undone afterwards (this model stays neutral).
+            ui.FrameIds(b.Id);
+            Activate(ui.Root, "explorer-light");
+            var bNeutral = RenderedPixels(camera);
+            var bStyler = b.StylerOrCreate;
+            int bTest = -1, bBest = 0; bool[] bRegion = null;
+            for (var i = 0; i < bStyler.PmxMaterialCount; i++)
+            {
+                if (!bStyler.PmxDrawn(i)) continue;
+                var candidate = RegionOf(b, i, camera, bNeutral);
+                var score = 0;
+                for (var p = 0; p < candidate.Length; p++) if (candidate[p] && bNeutral[p].r + bNeutral[p].g + bNeutral[p].b > 240) score++;
+                if (score > bBest) { bBest = score; bTest = i; bRegion = candidate; }
+            }
+            if (bTest < 0) throw new InvalidOperationException("No lit PMX material of the second character is on screen");
+            Activate(ui.Root, "object-" + b.Id);
+            var bDropdown = ui.Root.Q<DropdownField>("CorrectionMaterial");
+            bDropdown.value = bDropdown.choices.First(c => c.StartsWith(bTest + " · "));
+            ui.Root.Q<Slider>("CorrectionMaterialR").value = .6f; ui.Root.Q<Slider>("CorrectionMaterialBrightness").value = 1.3f;
+            var bTinted = Shot();
+            var bChanged = PixelsChanged(bNeutral, bTinted); var bLeaked = PixelsChanged(bNeutral, bTinted, bRegion.Select(v => !v).ToArray());
+            var bSlots = BlockedSlots(b);
+            var bOnly = bSlots.Count > 0 && bSlots.All(p => p == bTest) && b.MaterialStyle.style == MaterialStyleData.Original;
+            ui.Undo();
+            var bBack = b.Correction.IsNeutral && BlockedSlots(b).Count == 0 && PixelsChanged(bNeutral, Shot()) == 0;
+            Check("original_style_material_correction_changes_only_that_material [#" + bTest + " " + bStyler.PmxName(bTest) + ": region " + bRegion.Count(v => v) +
+                " px, changed " + bChanged + ", outside " + bLeaked + ", undone " + bBack + "]", bChanged > 20 && bLeaked == 0 && bOnly && bBack);
+
             // Leave corrections for the save/relaunch checks: the first character (object + one
             // material with gloss) and the stage (object brightness). The second character stays neutral.
             Activate(ui.Root, "object-" + a.Id);
