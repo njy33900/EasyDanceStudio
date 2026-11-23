@@ -11,8 +11,10 @@ namespace MmdStudio.Poc
     {
         private Button fullScreenButton;
         private Vector2Int windowedSize;
+        private FullScreenMode windowedMode = FullScreenMode.Windowed;
         private bool shownFullScreen;
-        internal bool FullScreen => Screen.fullScreenMode != FullScreenMode.Windowed;
+        // A maximized window (Windows reports MaximizedWindow) is still a window, not full screen.
+        internal bool FullScreen => Screen.fullScreenMode == FullScreenMode.FullScreenWindow || Screen.fullScreenMode == FullScreenMode.ExclusiveFullScreen;
 
         private void BuildWindowControls(VisualElement bar)
         {
@@ -26,6 +28,7 @@ namespace MmdStudio.Poc
             if (!FullScreen)
             {
                 windowedSize = new Vector2Int(Screen.width, Screen.height);
+                windowedMode = Screen.fullScreenMode; // Windowed or MaximizedWindow: given back as it was
                 // The monitor the window is on (not necessarily the primary one).
                 var display = Screen.mainWindowDisplayInfo;
                 var width = display.width > 0 ? display.width : Screen.currentResolution.width;
@@ -36,7 +39,7 @@ namespace MmdStudio.Poc
             else
             {
                 var size = windowedSize.x >= 320 && windowedSize.y >= 240 ? windowedSize : new Vector2Int(1280, 720);
-                Screen.SetResolution(size.x, size.y, FullScreenMode.Windowed);
+                Screen.SetResolution(size.x, size.y, windowedMode == FullScreenMode.MaximizedWindow ? FullScreenMode.MaximizedWindow : FullScreenMode.Windowed);
                 message = "창 모드로 돌아왔습니다. 창 가장자리를 끌어 크기를 바꿀 수 있습니다.";
             }
             UpdateStatus();

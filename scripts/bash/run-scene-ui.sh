@@ -14,6 +14,9 @@ EXE="$R\\out\\$CFG\\$PROFILE-$BK\\MmdStudioPoC.exe"
 EXEU="./out/$CFG/$PROFILE-$BK/MmdStudioPoC.exe"
 echo "artifacts=$AW exe=$EXE"
 if [ "${3:-}" != skipbuild ]; then
+  # A Player still running from the output folder locks its files and fails the build halfway.
+  RUNNING=$(powershell -NoProfile -Command "Get-Process MmdStudioPoC -ErrorAction SilentlyContinue | Where-Object { \$_.Path -eq '$EXE' } | Select-Object -ExpandProperty Id" 2>/dev/null | tr -d '\r')
+  if [ -n "$RUNNING" ]; then echo "BUILD_SKIPPED: close the running Player first (PID $RUNNING, $EXE)"; exit 1; fi
   timeout 1800 "/c/Program Files/Unity/Hub/Editor/6000.3.28f1/Editor/Unity.exe" -batchmode -nographics -quit \
     -projectPath "$R\\MMDStudio" -pocConfiguration "$CFG" -executeMethod MmdStudio.Poc.PocBuild.BuildWindows \
     -pocOutput "$EXE" -pocBackend "${BK,,}" -logFile "$AW\\poc-build.log" > "$A/build-stdout.txt" 2>&1

@@ -66,6 +66,10 @@ namespace MmdStudio.Poc
             if (backendName != "mono" && backendName != "il2cpp")
                 throw new ArgumentException("-pocBackend must be mono or il2cpp.");
             var previousBackend = PlayerSettings.GetScriptingBackend(NamedBuildTarget.Standalone);
+            // Packages add build-time entries here (the Input System its settings) and remove them in
+            // their post-build step, which a failed build never reaches.
+            var previousPreloaded = PlayerSettings.GetPreloadedAssets();
+            var succeeded = false;
             try
             {
                 PlayerSettings.SetScriptingBackend(NamedBuildTarget.Standalone,
@@ -78,9 +82,17 @@ namespace MmdStudio.Poc
                     options = configuration == "debug" ? BuildOptions.Development : BuildOptions.None
                 });
                 if (report.summary.result != BuildResult.Succeeded)
-                    throw new InvalidOperationException("Player build failed: " + report.summary.result);
+                    throw new InvalidOperationException("Player build failed: " + report.summary.result +
+                        " (a Player still running from the output folder locks its files; close it first)");
+                succeeded = true;
             }
-            finally { PlayerSettings.SetScriptingBackend(NamedBuildTarget.Standalone, previousBackend); }
+            finally
+            {
+                PlayerSettings.SetScriptingBackend(NamedBuildTarget.Standalone, previousBackend);
+                // A failed build would otherwise leave ProjectSettings.asset saved mid-build (backend,
+                // preloaded assets): put both back and write them, so the tracked file stays as it was.
+                if (!succeeded) { PlayerSettings.SetPreloadedAssets(previousPreloaded); AssetDatabase.SaveAssets(); }
+            }
             CopyThirdPartyNotices(Path.GetDirectoryName(output));
             File.WriteAllText(Path.Combine(Path.GetDirectoryName(output), "build-info.json"),
                 JsonUtility.ToJson(new BuildInfo { configuration = configuration, backend = backendName, developmentBuild = configuration == "debug" }, true));

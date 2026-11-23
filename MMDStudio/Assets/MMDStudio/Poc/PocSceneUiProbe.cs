@@ -418,8 +418,42 @@ namespace MmdStudio.Poc
                 Check("f11_full_screen_and_escape_back_to_window_size [" + fullDetail + " -> " + Screen.width + "x" + Screen.height + "]", wentFull &&
                     Screen.fullScreenMode == FullScreenMode.Windowed && Screen.width == windowedSize.x && Screen.height == windowedSize.y && !ui.FullScreen &&
                     ui.Root.Q<Button>("FullScreenToggle").text.StartsWith("전체 화면"));
+                // A maximized window (Windows reports MaximizedWindow) is still a window.
+                Screen.SetResolution(windowedSize.x, windowedSize.y, FullScreenMode.MaximizedWindow);
             }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            for (var i = 0; i < 120 && Screen.fullScreenMode != FullScreenMode.MaximizedWindow; i++) yield return null;
+            yield return new WaitForSecondsRealtime(.4f);
+            bool maximizedIsWindow = false, escapeKeepsMaximized = false; string maximizedDetail = "";
+            try
+            {
+                maximizedDetail = Screen.width + "x" + Screen.height + " " + Screen.fullScreenMode;
+                maximizedIsWindow = Screen.fullScreenMode == FullScreenMode.MaximizedWindow && !ui.FullScreen && ui.Root.Q<Button>("FullScreenToggle").text.StartsWith("전체 화면");
+                Key(ui, cancel: true);
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return new WaitForSecondsRealtime(.4f);
+            try
+            {
+                escapeKeepsMaximized = Screen.fullScreenMode == FullScreenMode.MaximizedWindow;
+                ui.ProcessViewportInput(new Vector2(-10, -10), Vector2.zero, 0, false, false, false, fullScreenKey: true);
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            for (var i = 0; i < 120 && !ui.FullScreen; i++) yield return null;
+            yield return new WaitForSecondsRealtime(.4f);
+            try { Key(ui, cancel: true); }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            for (var i = 0; i < 120 && Screen.fullScreenMode != FullScreenMode.MaximizedWindow; i++) yield return null;
+            yield return new WaitForSecondsRealtime(.4f);
+            try
+            {
+                Check("maximized_window_is_not_full_screen_and_comes_back_maximized [" + maximizedDetail + " -> " + Screen.fullScreenMode + "]",
+                    maximizedIsWindow && escapeKeepsMaximized && Screen.fullScreenMode == FullScreenMode.MaximizedWindow);
+                Screen.SetResolution(windowedSize.x, windowedSize.y, FullScreenMode.Windowed);
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            for (var i = 0; i < 120 && (Screen.fullScreenMode != FullScreenMode.Windowed || Screen.width != windowedSize.x); i++) yield return null;
+            yield return new WaitForSecondsRealtime(.4f);
 
             // ----- MVP-07 project save/open/new -----
             var project = Path.Combine(Path.GetDirectoryName(path), "project");
