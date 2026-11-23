@@ -41,6 +41,9 @@ namespace MmdStudio.Poc
             PlayerSettings.defaultScreenWidth = 1280;
             PlayerSettings.defaultScreenHeight = 720;
             PlayerSettings.fullScreenMode = FullScreenMode.Windowed;
+            // The window can be resized; F11 / the top bar's "전체 화면" (and Unity's Alt+Enter) go full screen.
+            PlayerSettings.resizableWindow = true;
+            PlayerSettings.allowFullscreenSwitch = true;
             // The external model does not exist in Assets at build time. Keep the
             // fallback shader and its variants available for runtime materials.
             var shader = Shader.Find("Universal Render Pipeline/Unlit");

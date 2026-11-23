@@ -70,6 +70,9 @@ namespace MmdStudio.Poc
             settings = ScriptableObject.CreateInstance<PanelSettings>();
             settings.scaleMode = PanelScaleMode.ScaleWithScreenSize;
             settings.referenceResolution = new Vector2Int(1280, 720);
+            // The window can be resized to any shape: scale by the tighter of width and height so
+            // the cards always fit (a wide, short window no longer pushes them off the bottom).
+            settings.screenMatchMode = PanelScreenMatchMode.Shrink;
             settings.themeStyleSheet = Resources.Load<ThemeStyleSheet>("PocRuntimeTheme");
             var document = gameObject.AddComponent<UIDocument>(); document.panelSettings = settings;
             Root = document.rootVisualElement;
@@ -402,6 +405,7 @@ namespace MmdStudio.Poc
             if (Scene == null) return;
             UpdateClock();
             if (DeviceInput) ReadDevices();
+            RefreshWindowControls();
             RefreshFocusNotice();
             RefreshPhysicsInfo();
             UpdateAutosave();

@@ -17,12 +17,14 @@ $info.WorkingDirectory=$root
 $previewRoot=Join-Path $root "artifacts\scene-ui\$Backend"
 if($Configuration -eq 'Release'){$previewRoot=Join-Path $previewRoot 'release'}
 New-Item -ItemType Directory -Path $previewRoot -Force | Out-Null
-$arguments=@('-sceneUi','-screen-fullscreen','0','-screen-width','1280','-screen-height','720',
-    '-logFile',(Join-Path $previewRoot 'preview.log'))
+# No forced window size: Unity reopens with the size and mode (window / full screen) the app had
+# when it was last closed. The window is resizable; F11 toggles full screen.
+$arguments=@('-sceneUi','-logFile',(Join-Path $previewRoot 'preview.log'))
 if($Pmx){$arguments+=@('-pocPmx',(Get-Item -LiteralPath $Pmx).FullName)}
 if($Vmd){$arguments+=@('-pocVmd',(Get-Item -LiteralPath $Vmd).FullName)}
 if($Scene){$arguments+=@('-sceneFile',(Get-Item -LiteralPath $Scene).FullName)}
-foreach($argument in $arguments){$info.ArgumentList.Add($argument)}
+# ProcessStartInfo.ArgumentList exists only in PowerShell 7 (.NET Core); quote for Windows PowerShell 5.1 too.
+$info.Arguments=($arguments | ForEach-Object { '"' + ($_ -replace '"','\"') + '"' }) -join ' '
 $player=[System.Diagnostics.Process]::Start($info)
 Write-Output "Scene Studio started (PID $($player.Id)). Add characters, then connect each VMD."
 $player.Dispose()

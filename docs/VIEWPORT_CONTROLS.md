@@ -12,6 +12,7 @@
 | Middle drag, or Shift + right drag | Pan pivot and camera together; the point under the cursor follows it |
 | Mouse wheel | Zoom toward the model surface under the cursor (the camera moves along the line to that point, so it stays at the same screen position; the pivot then sits on the view axis at the point's depth). Without a surface: toward the pivot (×0.88 per notch) |
 | F | Frame the selected character, or all visible characters when nothing is selected (a new pivot) |
+| F11 / top bar 전체 화면 | Full screen (borderless, at the resolution of the window's monitor) and back to the window size it had; works with dialogs open and while loading. Esc also leaves full screen once no dialog or focus view takes it. Unity's Alt+Enter works too |
 | 전체 보기 / 선택 보기 buttons | Same framing as before, now through the orbit camera |
 
 Until v0.6 the right drag orbited and the left drag did nothing. Framing keeps the current viewing angle and fits the bounding sphere into the smaller of the vertical and horizontal fields of view. A left press on a gizmo handle drags the gizmo instead. Only one button drives at a time: presses while another drag or click is in progress are ignored.

@@ -11,7 +11,7 @@ namespace MmdStudio.Poc
         public bool DollyHeld, PanHeld, LeftHeld;
         // The window lost the keyboard/mouse focus this frame (Alt+Tab, another window clicked).
         public bool FocusLost;
-        public bool FrameKey, PlayKey, DeleteKey, CancelKey, SaveKey, FocusKey, UndoKey, RedoKey;
+        public bool FrameKey, PlayKey, DeleteKey, CancelKey, SaveKey, FocusKey, UndoKey, RedoKey, FullScreenKey;
         public int GizmoKey; // 1 move, 2 rotate, 3 scale
 
         // Reads mouse and keyboard; false when there is no mouse.
@@ -39,6 +39,7 @@ namespace MmdStudio.Poc
             frame.FocusKey = keyboard != null && !ctrl && keyboard.hKey.wasPressedThisFrame;
             frame.UndoKey = ctrl && !shift && keyboard.zKey.wasPressedThisFrame;
             frame.RedoKey = ctrl && (keyboard.yKey.wasPressedThisFrame || (shift && keyboard.zKey.wasPressedThisFrame));
+            frame.FullScreenKey = Pressed(keyboard?.f11Key);
             return true;
         }
     }
@@ -56,6 +57,8 @@ namespace MmdStudio.Poc
         bool FocusView { get; }
         void SetFocusView(bool focused);
         bool Busy { get; }
+        bool FullScreen { get; }
+        void ToggleFullScreen();
         bool PointerInViewport(Vector2 screen);
         void ReleaseFocus();
         bool BeginGizmoDrag(Vector2 screen);
@@ -85,7 +88,8 @@ namespace MmdStudio.Poc
     //   Right drag: dolly (up = closer, down = farther; horizontal movement is ignored).
     //   Middle or Shift+right drag: pan.  Wheel: zoom toward the surface under the cursor.
     // Keys: F frames the selection, Space plays/pauses, Delete asks to delete the selection, Esc
-    // cancels a dialog, W/E/R switch the gizmo; a left press on a gizmo handle drags it instead.
+    // cancels a dialog (then leaves focus view, then full screen), F11 toggles full screen, W/E/R
+    // switch the gizmo; a left press on a gizmo handle drags it instead.
     // A press must start inside the viewport (not on a card, tab or dialog); a started drag
     // continues across panels. Only one button drives at a time: presses while another is held
     // are ignored. A drag ends on its button's release, focus loss, a dialog, or busy (loading,
@@ -110,6 +114,8 @@ namespace MmdStudio.Poc
             if (drag == Drag.Gizmo && !input.LeftHeld) { drag = Drag.None; target.EndGizmoDrag(); }
             else if ((drag == Drag.Orbit && !input.LeftHeld) || (drag == Drag.Dolly && !input.DollyHeld) || (drag == Drag.Pan && !input.PanHeld)) drag = Drag.None;
             if (input.FocusLost || !target.CameraReady) { Cancel(target); return; }
+            // F11 switches the window between full screen and windowed, whatever else is open.
+            if (input.FullScreenKey) { Cancel(target); target.ToggleFullScreen(); return; }
             if (target.DialogOpen)
             {
                 Cancel(target);
@@ -125,6 +131,8 @@ namespace MmdStudio.Poc
             var textFocused = target.TextFocused;
             if (!textFocused && input.FocusKey) { target.SetFocusView(!target.FocusView); return; }
             if (target.FocusView && input.CancelKey) { target.SetFocusView(false); return; }
+            // Esc leaves full screen once nothing else (dialog, confirmation, focus view) takes it.
+            if (!textFocused && input.CancelKey && target.FullScreen) { Cancel(target); target.ToggleFullScreen(); return; }
             if (target.Busy) { Cancel(target); return; }
             if ((leftPressed || dollyPressed || panPressed) && drag == Drag.None && !clickCandidate && target.PointerInViewport(screen))
             {

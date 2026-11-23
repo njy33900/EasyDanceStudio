@@ -56,6 +56,8 @@ namespace MmdStudio.Poc
             public bool FocusView => false;
             public void SetFocusView(bool focused) => Log.Add("focus " + focused);
             public bool Busy => false;
+            public bool FullScreen { get; set; }
+            public void ToggleFullScreen() { Log.Add("fullscreen"); FullScreen = !FullScreen; }
             public bool PointerInViewport(Vector2 screen) => InViewport;
             public void ReleaseFocus() { }
             public bool GizmoUnderPointer;
@@ -375,10 +377,49 @@ namespace MmdStudio.Poc
                     Camera.main.rect == new Rect(0, 0, 1, 1) &&
                     ui.PointerOverUi(new Vector2(64, Screen.height * .5f)) &&
                     ui.PointerInViewport(new Vector2(Screen.width * .5f, Screen.height * .5f)));
+                // A wide, short window: the UI shrinks to fit, so every card stays on screen.
+                Screen.SetResolution(1600, 600, false);
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return new WaitForSecondsRealtime(.4f);
+            try
+            {
+                var root = ui.Root.worldBound;
+                var cards = new[] { "TopBar", "Explorer", "Inspector", "PlaybackBar", "StatusBar" }.Select(name => ui.Root.Q(name).worldBound).ToArray();
+                Check("wide_short_window_keeps_cards_on_screen [" + Screen.width + "x" + Screen.height + "]", Screen.width == 1600 && Screen.height == 600 &&
+                    cards.All(card => card.yMin >= root.yMin - .5f && card.yMax <= root.yMax + .5f && card.xMin >= root.xMin - .5f && card.xMax <= root.xMax + .5f) &&
+                    ui.PointerInViewport(new Vector2(Screen.width * .5f, Screen.height * .5f)));
                 Screen.SetResolution(1280, 720, false);
             }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
             yield return new WaitForSecondsRealtime(.4f);
+
+            // Full screen: F11 goes borderless at the resolution of the window's monitor; Esc comes
+            // back to the window size it had. (The test window covers the screen for about a second.)
+            var windowedSize = new Vector2Int(Screen.width, Screen.height);
+            try { ui.ProcessViewportInput(new Vector2(-10, -10), Vector2.zero, 0, false, false, false, fullScreenKey: true); }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            for (var i = 0; i < 120 && Screen.fullScreenMode == FullScreenMode.Windowed; i++) yield return null;
+            yield return new WaitForSecondsRealtime(.4f);
+            string fullDetail; bool wentFull;
+            try
+            {
+                var display = Screen.mainWindowDisplayInfo;
+                fullDetail = Screen.width + "x" + Screen.height + " " + Screen.fullScreenMode + " on " + display.width + "x" + display.height;
+                wentFull = Screen.fullScreenMode == FullScreenMode.FullScreenWindow && Screen.width == display.width && Screen.height == display.height &&
+                    ui.FullScreen && ui.Root.Q<Button>("FullScreenToggle").text.StartsWith("창 모드") && Camera.main.rect == new Rect(0, 0, 1, 1);
+                Key(ui, cancel: true); // Esc leaves full screen (no dialog, no focus view)
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            for (var i = 0; i < 120 && Screen.fullScreenMode != FullScreenMode.Windowed; i++) yield return null;
+            yield return new WaitForSecondsRealtime(.4f);
+            try
+            {
+                Check("f11_full_screen_and_escape_back_to_window_size [" + fullDetail + " -> " + Screen.width + "x" + Screen.height + "]", wentFull &&
+                    Screen.fullScreenMode == FullScreenMode.Windowed && Screen.width == windowedSize.x && Screen.height == windowedSize.y && !ui.FullScreen &&
+                    ui.Root.Q<Button>("FullScreenToggle").text.StartsWith("전체 화면"));
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
 
             // ----- MVP-07 project save/open/new -----
             var project = Path.Combine(Path.GetDirectoryName(path), "project");
@@ -631,9 +672,9 @@ namespace MmdStudio.Poc
                 var fake = new FakeViewportTarget(); var router = new ViewportInputRouter();
                 var last = Vector2.zero;
                 // One frame at `at`; the delta is the movement since the previous frame.
-                ViewportInputFrame F(Vector2 at, bool left = false, bool right = false, bool pan = false, bool cancel = false, bool undo = false, bool focusLost = false)
+                ViewportInputFrame F(Vector2 at, bool left = false, bool right = false, bool pan = false, bool cancel = false, bool undo = false, bool focusLost = false, bool fullScreen = false)
                 {
-                    var frame = new ViewportInputFrame { Screen = at, Delta = at - last, LeftHeld = left, DollyHeld = right, PanHeld = pan, CancelKey = cancel, UndoKey = undo, FocusLost = focusLost };
+                    var frame = new ViewportInputFrame { Screen = at, Delta = at - last, LeftHeld = left, DollyHeld = right, PanHeld = pan, CancelKey = cancel, UndoKey = undo, FocusLost = focusLost, FullScreenKey = fullScreen };
                     last = at; return frame;
                 }
                 void Run(params ViewportInputFrame[] frames) { foreach (var frame in frames) router.Route(frame, fake); }
@@ -688,9 +729,15 @@ namespace MmdStudio.Poc
                 Run(F(new Vector2(5, 5), left: true, undo: true), F(new Vector2(5, 5)));
                 var outside = fake.Log.Contains("undo") && !fake.Log.Any(entry => entry.StartsWith("click"));
                 fake.InViewport = true;
-                var all = clicked && leftOrbit && dolly && panned && still && gizmo && oneButton && focusEnds && acrossPanels && dialogBlocks && outside;
+                // F11 toggles full screen even with a dialog open; Esc leaves full screen once no dialog takes it.
+                fake.Log.Clear(); fake.DialogOpen = true; last = p;
+                Run(F(p, fullScreen: true)); var fullWithDialog = fake.FullScreen;
+                Run(F(p, cancel: true)); fake.DialogOpen = false; var dialogTookEsc = fake.FullScreen;
+                Run(F(p, cancel: true)); Run(F(p, cancel: true));
+                var fullScreenKeys = fullWithDialog && dialogTookEsc && !fake.FullScreen && fake.Log.SequenceEqual(new[] { "fullscreen", "cancelDialog", "fullscreen" });
+                var all = clicked && leftOrbit && dolly && panned && still && gizmo && oneButton && focusEnds && acrossPanels && dialogBlocks && outside && fullScreenKeys;
                 Check("input_router_rules_without_ui" + (all ? "" : " [click=" + clicked + " leftOrbit=" + leftOrbit + " dolly=" + dolly + " pan=" + panned + " still=" + still +
-                    " gizmo=" + gizmo + " oneButton=" + oneButton + " focus=" + focusEnds + " panels=" + acrossPanels + " dialog=" + dialogBlocks + " outside=" + outside + "]"), all);
+                    " gizmo=" + gizmo + " oneButton=" + oneButton + " focus=" + focusEnds + " panels=" + acrossPanels + " dialog=" + dialogBlocks + " outside=" + outside + " fullScreen=" + fullScreenKeys + "]"), all);
             }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
 

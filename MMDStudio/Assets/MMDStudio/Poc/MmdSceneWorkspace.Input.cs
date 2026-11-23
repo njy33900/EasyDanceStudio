@@ -37,12 +37,12 @@ namespace MmdStudio.Poc
         // directly; the Player feeds it from ReadDevices. dollyHeld: right button without Shift.
         internal void ProcessViewportInput(Vector2 screen, Vector2 delta, float scrollNotches, bool dollyHeld, bool panHeld, bool frameKey,
             bool leftHeld = false, bool playKey = false, bool deleteKey = false, bool cancelKey = false, bool saveKey = false, int gizmoKey = 0, bool focusKey = false,
-            bool undoKey = false, bool redoKey = false, bool focusLost = false) =>
+            bool undoKey = false, bool redoKey = false, bool focusLost = false, bool fullScreenKey = false) =>
             inputRouter.Route(new ViewportInputFrame
             {
                 Screen = screen, Delta = delta, ScrollNotches = scrollNotches, DollyHeld = dollyHeld, PanHeld = panHeld, LeftHeld = leftHeld,
                 FrameKey = frameKey, PlayKey = playKey, DeleteKey = deleteKey, CancelKey = cancelKey, SaveKey = saveKey, GizmoKey = gizmoKey,
-                FocusKey = focusKey, UndoKey = undoKey, RedoKey = redoKey, FocusLost = focusLost,
+                FocusKey = focusKey, UndoKey = undoKey, RedoKey = redoKey, FocusLost = focusLost, FullScreenKey = fullScreenKey,
             }, this);
         private void ReadDevices() { if (ViewportInputFrame.ReadDevices(out var frame)) inputRouter.Route(frame, this); }
         private void CancelPointerDrag() => inputRouter.Cancel(this);
@@ -59,6 +59,8 @@ namespace MmdStudio.Poc
         bool IViewportInputTarget.FocusView => FocusView;
         void IViewportInputTarget.SetFocusView(bool focused) => SetFocusView(focused);
         bool IViewportInputTarget.Busy => Busy;
+        bool IViewportInputTarget.FullScreen => FullScreen;
+        void IViewportInputTarget.ToggleFullScreen() => ToggleFullScreen(); // also while loading (Guard would skip it)
         bool IViewportInputTarget.PointerInViewport(Vector2 screen) => PointerInViewport(screen);
         void IViewportInputTarget.ReleaseFocus() => (Root.panel?.focusController?.focusedElement as VisualElement)?.Blur();
         bool IViewportInputTarget.BeginGizmoDrag(Vector2 screen) => BeginGizmoDrag(screen);
