@@ -2,7 +2,7 @@
 
 기준일: **2026-11-19 (한국 시간)**. 사용자가 Codex에서 진행하던 작업을 Claude로 이어서 진행하도록 요청하여 작성한 현재 상태 요약이다. 같은 날 Claude가 MVP-03(뷰포트 조작·선택 강조), MVP-04(PMX 배경), MVP-05(뷰포트 클릭 선택·단축키·삭제 확인), MVP-06(카메라·조명·기본 그래픽), MVP-07(`.mmdscene` 저장/복원), MVP-08(밝은 미니멀 UI 재디자인), MVP-09(통합·성능 보고서·알려진 문제), MVP-10(W/E/R 변형 기즈모)을 구현·검증하고 이 문서를 갱신했다. **1차 MVP 기능은 기즈모까지 구현·자동 검증 완료, 사람의 수동 확인·클린 PC·중급 PC 측정이 남았다.**
 
-> **최신 인계는 [docs/handoff/](docs/handoff/README.md) 폴더를 먼저 본다** (현재: `2026-11-23_v0.61-autorun_to_review.md`). 이 파일은 전체 배경과 이력이다.
+> **최신 인계는 [docs/handoff/](docs/handoff/README.md) 폴더를 먼저 본다** (현재: `2026-11-24_window-fullscreen_to_review.md`). 이 파일은 전체 배경과 이력이다.
 >
 > **Codex 검토 요청과 다음 스텝 후보는 [REVIEW_FOR_CODEX.md](REVIEW_FOR_CODEX.md)에 정리했다.** 이 문서는 현재 상태 기준이다.
 >
@@ -47,10 +47,11 @@ out/debug|release/MVP-02~08-*/                (이전 UI, 보존)
 저장소 루트에서 PowerShell 7로 실행한다. **이 PC의 Claude 세션 환경에는 `pwsh`가 설치되어 있지 않았다.** MVP-03~09 검증은 같은 Unity 빌드 명령과 Player 인자를 bash로 그대로 실행했다(스크립트 로직 동일, UI 95개 + 재실행 복원 9개 기준 확인, `.ps1`은 Windows PowerShell 구문 검사만). `PocBuild`는 빌드마다 `PocSmoke.unity`를 새 fileID로 다시 저장하므로 빌드 후 Git에서 되돌린다.
 
 ```powershell
-# 현재 다중 캐릭터 UI. 기본은 Debug/Mono.
-pwsh -NoProfile -File scripts/Start-SceneStudio.ps1
-pwsh -NoProfile -File scripts/Start-SceneStudio.ps1 -Configuration Release
-pwsh -NoProfile -File scripts/Start-SceneStudio.ps1 -Backend IL2CPP
+# 현재 다중 캐릭터 UI. 기본은 Release/IL2CPP(2026-11-24부터, 검증 기준 빌드). Windows PowerShell 5.1에서도 실행된다.
+# 창 크기를 강제하지 않아 마지막 창 크기·모드(창/최대화/전체 화면)로 열린다. 창은 크기 조절 가능, F11 전체 화면.
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Start-SceneStudio.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Start-SceneStudio.ps1 -Scene path	o\scene.mmdscene
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Start-SceneStudio.ps1 -Configuration Debug -Backend Mono
 
 # 새로 빌드하고 실제 UI 검증. -SkipBuild를 추가하면 기존 EXE 재사용.
 pwsh -NoProfile -File scripts/Invoke-SceneVerification.ps1 -Ui -Configuration Debug -Backend Mono

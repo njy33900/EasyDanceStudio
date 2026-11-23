@@ -4,7 +4,8 @@
 
 | 날짜 | 문서 | 요약 |
 |---|---|---|
-| 2026-11-23 | [2026-11-23_v0.61-autorun_to_review.md](2026-11-23_v0.61-autorun_to_review.md) | **최신.** v0.61 후 자율 실행: 장치 수준 입력 검사, Debug 구성 검증, 재생 중 조작·보정 성능, 룩 비용 재측정(잡음), 원본 스타일 보정 검사. UI 214 |
+| 2026-11-24 | [2026-11-24_window-fullscreen_to_review.md](2026-11-24_window-fullscreen_to_review.md) | **최신.** 창 크기 조절·F11 전체 화면, 최대화 오판 수정, 빌드 보강(Hub·잠긴 Player), 사용자 마우스 확인. 4개 구성 UI 217 |
+| 2026-11-23 | [2026-11-23_v0.61-autorun_to_review.md](2026-11-23_v0.61-autorun_to_review.md) | v0.61 후 자율 실행: 장치 수준 입력 검사, Debug 구성 검증, 재생 중 조작·보정 성능, 룩 비용 재측정(잡음), 원본 스타일 보정 검사. UI 214 |
 | 2026-11-23 | [2026-11-23_v0.61-impl_to_player-verify.md](2026-11-23_v0.61-impl_to_player-verify.md) | v0.61 구현(마우스 카메라·화면 보정), verify-all IL2CPP·Mono 통과(UI 211, 복원 14), 커밋·푸시. 실제 마우스 확인 대기 |
 | 2026-11-22 | [2026-11-22_v0.6-spec-run_to_review.md](2026-11-22_v0.6-spec-run_to_review.md) | v0.6 명세 자율 실행 완료(H2a·H2b·H3·D), 결정 대기 목록, 검토 출발점 |
 | 2026-11-21 | [2026-11-21_H2a_to_H2b.md](2026-11-21_H2a_to_H2b.md) | H2a 완료(오디오·DOF/SSAO·카메라 VMD·룩 프리셋), 결정 대기 목록, H2b 재질 스타일 출발점 |

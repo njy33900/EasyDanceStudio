@@ -1,6 +1,7 @@
 param(
-    [ValidateSet('Debug','Release')][string]$Configuration = 'Debug',
-    [ValidateSet('Mono','IL2CPP')][string]$Backend = 'Mono',
+    # Release IL2CPP is the build every verification run checks (and the fastest).
+    [ValidateSet('Debug','Release')][string]$Configuration = 'Release',
+    [ValidateSet('Mono','IL2CPP')][string]$Backend = 'IL2CPP',
     [string]$Pmx,
     [string]$Vmd,
     [string]$Scene

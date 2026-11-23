@@ -58,9 +58,9 @@ Every build/verification/launch script accepts `-Configuration Debug` (default) 
 pwsh -NoProfile -File scripts/Invoke-SceneVerification.ps1 -Ui -Configuration Debug
 pwsh -NoProfile -File scripts/Invoke-SceneVerification.ps1 -Ui -Configuration Release
 
-# Launch either output.
-pwsh -NoProfile -File scripts/Start-SceneStudio.ps1 -Configuration Debug
-pwsh -NoProfile -File scripts/Start-SceneStudio.ps1 -Configuration Release
+# Launch either output (Windows PowerShell 5.1 works; default Release IL2CPP since 2026-11-24).
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Start-SceneStudio.ps1 -Configuration Debug
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Start-SceneStudio.ps1 -Configuration Release
 ```
 
 Use `-Backend IL2CPP` for the corresponding backend. Other scripts (POC, physics chain/features, legacy preview and Sandrone preview) use the same configuration option and root convention. Build configuration selection does not change supported product features or implicitly enable physics.
