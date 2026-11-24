@@ -6,6 +6,8 @@
 // shows the texture's own colours on the lit side.
 // v0.61: _Gloss adds a stepped specular highlight on the lit side (0 = none, the default, so
 // existing looks are unchanged); its size follows the PMX specular power (_GlossPower).
+// 2026-11-24: _ShadowSoftness is set per object (soft gradient vs hard step) and _Ambient adds
+// the environment light (spherical harmonics) on the shadow side; both default to the old look.
 Shader "EasyDanceStudio/Toon"
 {
     Properties
@@ -20,6 +22,7 @@ Shader "EasyDanceStudio/Toon"
         _RimStrength ("Rim Strength", Range(0, 1)) = 0.3
         _RimPower ("Rim Power", Range(0.5, 8)) = 4
         _LightScale ("Light Scale", Float) = 0.5
+        _Ambient ("Ambient Fill", Range(0, 1)) = 0
         _Gloss ("Gloss", Range(0, 1)) = 0
         _GlossPower ("Gloss Power", Range(4, 256)) = 32
         _OutlineColor ("Outline Color", Color) = (0, 0, 0, 1)
@@ -48,6 +51,7 @@ Shader "EasyDanceStudio/Toon"
             half _RimStrength;
             half _RimPower;
             half _LightScale;
+            half _Ambient;
             half _Gloss;
             half _GlossPower;
             half4 _OutlineColor;
@@ -113,7 +117,10 @@ Shader "EasyDanceStudio/Toon"
                 half rim = pow(saturate(1 - dot(normal, view)), _RimPower) * _RimStrength * saturate(lit + 0.25h);
                 half specular = pow(saturate(dot(normal, normalize(light.direction + view))), _GlossPower);
                 half highlight = smoothstep(0.35h, 0.65h, specular) * _Gloss * lit;
-                half3 colour = base.rgb * shade * lightColour + (rim + highlight) * lightColour;
+                // Environment fill (the scene's ambient probe), mostly on the shadow side so the lit
+                // side keeps its colours; 0 (the default) leaves the earlier look unchanged.
+                half3 fill = SampleSH(normal) * _Ambient * (1 - 0.6h * lit);
+                half3 colour = base.rgb * (shade * lightColour + fill) + (rim + highlight) * lightColour;
                 colour = MixFog(colour, input.fogFactor);
                 return half4(colour, _Surface > 0.5h ? base.a : 1);
             }

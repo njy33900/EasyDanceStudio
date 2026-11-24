@@ -219,6 +219,7 @@ namespace MmdStudio.Poc
             CreateConfirm();
             CreateDialog();
             Application.wantsToQuit += OnWantsToQuit;
+            MmdWindowLimits.Install(); // the window cannot be made smaller than the UI can use
             Camera.main.rect = new Rect(0, 0, 1, 1);
             View.Apply(Camera.main);
             Refresh();

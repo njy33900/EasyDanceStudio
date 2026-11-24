@@ -133,7 +133,7 @@ namespace MmdStudio.Poc
             foreach (var item in Scene.Objects)
             {
                 if (!item.Visible) continue;
-                foreach (var renderer in item.Model.root.GetComponentsInChildren<SkinnedMeshRenderer>())
+                foreach (var renderer in item.SkinnedRenderers)
                 {
                     if (!renderer.enabled || renderer.sharedMesh == null) continue;
                     if (!renderer.bounds.IntersectRay(ray, out var enter) || enter >= result.Distance) continue;

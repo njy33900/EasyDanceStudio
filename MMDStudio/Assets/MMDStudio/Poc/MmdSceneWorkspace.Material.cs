@@ -29,6 +29,8 @@ namespace MmdStudio.Poc
             MaterialToggle(toonControls, "ToonShadow", "명암 경계", d => d.shadow, (d, v) => d.shadow = v);
             MaterialSlider(toonControls, "ToonShadowBorder", "경계 위치", -1, 1, d => d.shadowBorder, (d, v) => d.shadowBorder = v);
             MaterialSlider(toonControls, "ToonShadowStrength", "그림자 진하기", 0, 1, d => d.shadowStrength, (d, v) => d.shadowStrength = v);
+            MaterialSlider(toonControls, "ToonShadowSoftness", "명암 부드러움", .01f, .5f, d => d.shadowSoftness, (d, v) => d.shadowSoftness = v);
+            MaterialSlider(toonControls, "ToonAmbient", "환경광 받기", 0, 1, d => d.ambient, (d, v) => d.ambient = v);
             MaterialToggle(toonControls, "ToonRim", "림 라이트", d => d.rim, (d, v) => d.rim = v);
             MaterialSlider(toonControls, "ToonRimStrength", "림 라이트 강도", 0, 1, d => d.rimStrength, (d, v) => d.rimStrength = v);
             MaterialToggle(toonControls, "ToonOutline", "윤곽선", d => d.outline, (d, v) => d.outline = v);
@@ -38,7 +40,7 @@ namespace MmdStudio.Poc
             MaterialSlider(pbrControls, "PbrMetallic", "금속성", 0, 1, d => d.metallic, (d, v) => d.metallic = v);
             materialWarnings = Text(section, "", "eds-note"); materialWarnings.name = "MaterialWarnings";
             materialApplyAll = TextButton(section, "MaterialApplyAll", "모든 캐릭터에 이 툰 설정 적용", () => Guard(ApplyToonToAll), "eds-button--block");
-            Text(section, "원본 PMX와 텍스처는 바꾸지 않고 장면에만 저장합니다. 툰은 조명 방향·색·그림자를 받습니다.", "eds-note").name = "MaterialNote";
+            Text(section, "원본 PMX와 텍스처는 바꾸지 않고 장면에만 저장합니다. 툰은 조명 방향·색·그림자를 받습니다. 명암 부드러움을 올리면 경계가 부드러운 그라데이션이 되고, 환경광 받기는 조명 섹션의 환경광으로 그림자 쪽을 밝힙니다.", "eds-note").name = "MaterialNote";
         }
 
         private void MaterialToggle(VisualElement parent, string name, string label, Func<MaterialStyleData, bool> get, Action<MaterialStyleData, bool> set)

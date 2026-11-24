@@ -15,6 +15,10 @@ namespace MmdStudio.Poc
         public SceneGraphicsSettings values = new SceneGraphicsSettings();
         // H2b-01: style the preset gives every character ("" leaves materials as they are).
         public string characterStyle = "";
+        // 2026-11-24: when set, the preset also gives every character these toon values (softness,
+        // environment fill, outline...); otherwise toon keeps each character's own values.
+        public bool characterToonValues;
+        public MaterialStyleData characterToon = new MaterialStyleData { style = MaterialStyleData.Toon };
         [NonSerialized] public bool builtIn;
     }
 
@@ -46,6 +50,21 @@ namespace MmdStudio.Poc
                 backgroundColor = new Color(.04f, .03f, .08f), ssaoEnabled = true, ssaoIntensity = 1.2f, ssaoRadius = .3f,
                 vignetteEnabled = true, vignetteIntensity = .45f, dofEnabled = true, dofStrength = .5f,
             } },
+            // 2026-11-24, after the user's graphics reference (a bright daylight studio MMD video): high key,
+            // soft daylight from the front-top, a sky-blue environment fill lifting the shadow side, soft
+            // contact shadows (SSAO), gentle bloom, a little less contrast and saturation; characters in
+            // soft-gradient toon with thin outlines.
+            new LookPreset { name = "밝은 스튜디오", builtIn = true, characterStyle = MaterialStyleData.Toon, characterToonValues = true,
+                characterToon = new MaterialStyleData { style = MaterialStyleData.Toon, shadow = true, shadowBorder = -.1f, shadowStrength = .55f, shadowSoftness = .3f,
+                    ambient = .7f, rim = true, rimStrength = .15f, outline = true, outlineWidth = .5f },
+                values = new SceneGraphicsSettings
+            {
+                lightColor = new Color(1, .97f, .93f), lightIntensity = 2f, lightYaw = -25, lightPitch = 50, shadowQuality = MmdShadowQuality.High,
+                bloomEnabled = true, bloomIntensity = .4f, tonemapping = true, exposure = .35f, contrast = -8, saturation = -12,
+                backgroundColor = new Color(.86f, .9f, .96f), ssaoEnabled = true, ssaoIntensity = .6f, ssaoRadius = .4f,
+                vignetteEnabled = false, vignetteIntensity = .2f, dofEnabled = false, dofStrength = .3f,
+                ambientIntensity = .9f, ambientColor = new Color(.9f, .93f, 1f),
+            } },
         };
 
         // Copies the look fields of `preset` onto `target` (everything else is kept).
@@ -59,6 +78,7 @@ namespace MmdStudio.Poc
             target.dofEnabled = preset.dofEnabled; target.dofStrength = preset.dofStrength;
             target.ssaoEnabled = preset.ssaoEnabled; target.ssaoIntensity = preset.ssaoIntensity; target.ssaoRadius = preset.ssaoRadius;
             target.vignetteEnabled = preset.vignetteEnabled; target.vignetteIntensity = preset.vignetteIntensity;
+            target.ambientIntensity = preset.ambientIntensity; target.ambientColor = preset.ambientColor;
         }
 
         // True when the look fields of `current` equal the preset's (slider rounding tolerated).
@@ -73,7 +93,8 @@ namespace MmdStudio.Poc
                 C(preset.backgroundColor, current.backgroundColor) &&
                 preset.dofEnabled == current.dofEnabled && F(preset.dofStrength, current.dofStrength) &&
                 preset.ssaoEnabled == current.ssaoEnabled && F(preset.ssaoIntensity, current.ssaoIntensity) && F(preset.ssaoRadius, current.ssaoRadius) &&
-                preset.vignetteEnabled == current.vignetteEnabled && F(preset.vignetteIntensity, current.vignetteIntensity);
+                preset.vignetteEnabled == current.vignetteEnabled && F(preset.vignetteIntensity, current.vignetteIntensity) &&
+                F(preset.ambientIntensity, current.ambientIntensity) && (preset.ambientIntensity <= 0 || C(preset.ambientColor, current.ambientColor));
         }
 
         public static string CheckName(string name, IEnumerable<LookPreset> existingUser)

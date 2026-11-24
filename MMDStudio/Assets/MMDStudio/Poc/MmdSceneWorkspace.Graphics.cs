@@ -39,6 +39,11 @@ namespace MmdStudio.Poc
             GraphicsSlider(lightSection, "LightIntensity", "강도", 0, 8, s => s.lightIntensity, (s, v) => s.lightIntensity = v);
             GraphicsSlider(lightSection, "LightYaw", "수평 방향", -180, 180, s => s.lightYaw, (s, v) => s.lightYaw = v);
             GraphicsSlider(lightSection, "LightPitch", "높이", 5, 90, s => s.lightPitch, (s, v) => s.lightPitch = v);
+            // 2026-11-24: environment light (0 = the scene's own); toon characters take it with "환경광 받기".
+            GraphicsSlider(lightSection, "AmbientIntensity", "환경광 (0=기본)", 0, 2, s => s.ambientIntensity, (s, v) => s.ambientIntensity = v);
+            GraphicsSlider(lightSection, "AmbientR", "환경광 R", 0, 1, s => s.ambientColor.r, (s, v) => s.ambientColor.r = v);
+            GraphicsSlider(lightSection, "AmbientG", "환경광 G", 0, 1, s => s.ambientColor.g, (s, v) => s.ambientColor.g = v);
+            GraphicsSlider(lightSection, "AmbientB", "환경광 B", 0, 1, s => s.ambientColor.b, (s, v) => s.ambientColor.b = v);
             shadowQuality = new DropdownField("그림자", ShadowLabels.ToList(), 2) { name = "ShadowQuality" }; lightSection.Add(shadowQuality);
             shadowQuality.RegisterValueChangedCallback(evt =>
             {
@@ -106,6 +111,7 @@ namespace MmdStudio.Poc
         {
             var next = Graphics.Settings; var d = new SceneGraphicsSettings();
             next.lightColor = d.lightColor; next.lightIntensity = d.lightIntensity; next.lightYaw = d.lightYaw; next.lightPitch = d.lightPitch; next.shadowQuality = d.shadowQuality;
+            next.ambientIntensity = d.ambientIntensity; next.ambientColor = d.ambientColor;
             Record("조명 초기화", null, () => Graphics.Apply(next)); message = "조명을 기본값으로 되돌렸습니다.";
         }
 
@@ -137,7 +143,7 @@ namespace MmdStudio.Poc
             if (settings.dofEnabled && settings.dofTarget.Length > 0)
             {
                 var item = Scene.Objects.FirstOrDefault(o => o.Id == settings.dofTarget);
-                if (item != null && item.Visible && TryBounds(new[] { item }, out var bounds))
+                if (item != null && item.Visible && TryBounds(item, out var bounds))
                     focus = Vector3.Dot(bounds.center - Camera.main.transform.position, Camera.main.transform.forward);
             }
             Graphics.SetFocusOverride(focus);

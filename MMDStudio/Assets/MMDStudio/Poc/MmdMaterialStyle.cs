@@ -22,6 +22,10 @@ namespace MmdStudio.Poc
         public float rimStrength = .3f;     // 0..1
         public bool outline = true;         // only where the PMX material draws an edge
         public float outlineWidth = 1;      // 0..3 x the PMX edge size
+        // 2026-11-24 (additive): how wide the light-to-shadow gradient is (0.01 hard step .. 0.5 soft,
+        // the default keeps the earlier look) and how much environment light fills the shadow side.
+        public float shadowSoftness = .04f;
+        public float ambient;               // 0..1
         public float smoothness = .3f, metallic = 0; // pbr
 
         public MaterialStyleData Clone() => (MaterialStyleData)MemberwiseClone();
@@ -31,6 +35,7 @@ namespace MmdStudio.Poc
             if (style != Original && style != Toon && style != Pbr) throw new ArgumentOutOfRangeException(nameof(style), "재질 스타일 값이 올바르지 않습니다: " + style);
             Range(shadowBorder, -1, 1, "명암 경계 위치는 -1~1이어야 합니다."); Range(shadowStrength, 0, 1, "명암 강도는 0~1이어야 합니다.");
             Range(rimStrength, 0, 1, "림 라이트 강도는 0~1이어야 합니다."); Range(outlineWidth, 0, 3, "윤곽선 두께는 0~3배여야 합니다.");
+            Range(shadowSoftness, .01f, .5f, "명암 부드러움은 0.01~0.5여야 합니다."); Range(ambient, 0, 1, "환경광 받기는 0~1이어야 합니다.");
             Range(smoothness, 0, 1, "매끄러움은 0~1이어야 합니다."); Range(metallic, 0, 1, "금속성은 0~1이어야 합니다.");
         }
         private static void Range(float value, float min, float max, string message)
@@ -291,6 +296,8 @@ namespace MmdStudio.Poc
             if (!toon) { material.SetFloat("_Smoothness", data.smoothness); material.SetFloat("_Metallic", data.metallic); return; }
             material.SetFloat("_ShadowStrength", data.shadow ? data.shadowStrength : 0);
             material.SetFloat("_ShadowBorder", data.shadowBorder);
+            material.SetFloat("_ShadowSoftness", data.shadowSoftness);
+            material.SetFloat("_Ambient", data.ambient);
             material.SetFloat("_RimStrength", data.rim ? data.rimStrength : 0);
             var edge = pmx.HasValue && (pmx.Value.drawingFlags & PMXMaterial.DrawingFlags.DrawEdge) != 0 && pmx.Value.edgeSize > 0;
             var outline = data.outline && edge && data.outlineWidth > 0;

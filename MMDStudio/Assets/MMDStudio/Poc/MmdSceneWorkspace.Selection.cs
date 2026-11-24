@@ -37,11 +37,26 @@ namespace MmdStudio.Poc
         }
         internal static bool TryBounds(System.Collections.Generic.IEnumerable<MmdSceneService.SceneObject> items, out Bounds bounds)
         {
-            var renderers = items.SelectMany(item => item.Model.root.GetComponentsInChildren<SkinnedMeshRenderer>()).ToArray();
+            bounds = default; var any = false;
+            foreach (var item in items) any |= Encapsulate(item, ref bounds, any);
+            return any;
+        }
+        // One object, without allocating (called every frame for the highlight and the DOF focus).
+        internal static bool TryBounds(MmdSceneService.SceneObject item, out Bounds bounds)
+        {
             bounds = default;
-            if (renderers.Length == 0) return false;
-            bounds = renderers[0].bounds; foreach (var renderer in renderers) bounds.Encapsulate(renderer.bounds);
-            return true;
+            return Encapsulate(item, ref bounds, false);
+        }
+        private static bool Encapsulate(MmdSceneService.SceneObject item, ref Bounds bounds, bool started)
+        {
+            var any = false;
+            foreach (var renderer in item.SkinnedRenderers)
+            {
+                if (renderer == null) continue;
+                if (!started && !any) bounds = renderer.bounds; else bounds.Encapsulate(renderer.bounds);
+                any = true;
+            }
+            return any;
         }
         private void Frame(System.Collections.Generic.IEnumerable<MmdSceneService.SceneObject> items)
         {
@@ -62,7 +77,7 @@ namespace MmdStudio.Poc
         {
             if (highlight == null) return;
             var selected = Selected;
-            if (FocusView || Exporting || selected == null || !selected.Visible || !TryBounds(new[] { selected }, out var bounds)) { highlight.Hide(); return; }
+            if (FocusView || Exporting || selected == null || !selected.Visible || !TryBounds(selected, out var bounds)) { highlight.Hide(); return; }
             highlight.Show(bounds, selected.Placement.position, View.Distance);
         }
     }

@@ -63,6 +63,10 @@ namespace MmdStudio.Poc
             public string[] MaterialWarnings => StylerOrCreate.Warnings(MaterialStyle.style);
             // v0.61: screen correction (object colour/brightness, per-PMX-material colour/gloss).
             public ColorCorrectionData Correction { get; internal set; } = new ColorCorrectionData();
+            // v0.6 review 13: the model's skinned renderers, found once (the set never changes after
+            // import) instead of walking the hierarchy every frame for the highlight, focus and picking.
+            private SkinnedMeshRenderer[] skinnedRenderers;
+            internal SkinnedMeshRenderer[] SkinnedRenderers => skinnedRenderers ?? (skinnedRenderers = Model.root.GetComponentsInChildren<SkinnedMeshRenderer>());
             public string[] MotionParts => (Bake == null ? new string[0] : Bake.Parts)
                 .Union(SpringBake == null ? new string[0] : SpringBake.Parts)
                 .OrderBy(p => Array.IndexOf(MmdPhysicsParts.Order, p)).ToArray();

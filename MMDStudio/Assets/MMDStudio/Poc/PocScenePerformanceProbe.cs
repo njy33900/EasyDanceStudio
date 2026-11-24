@@ -207,7 +207,7 @@ namespace MmdStudio.Poc
                 Cost("all_effects_off_shadows_off", bare);
                 // H2a-05: each built-in look preset on the reference scene.
                 for (var i = 0; i < MmdLookPresets.BuiltIn.Length; i++)
-                    Cost("look_" + i + "_" + new[] { "bright_stage", "evening_outdoor", "dark_club" }[Math.Min(i, 2)], Look(i));
+                    Cost("look_" + i + "_" + new[] { "bright_stage", "evening_outdoor", "dark_club", "bright_studio" }[Math.Min(i, 3)], Look(i));
                 // What a look costs, feature by feature: each one added to the reference alone, and
                 // each one taken out of the heaviest look (evening outdoor: high shadows, SSAO, DOF, vignette).
                 var evening = MmdLookPresets.BuiltIn[Math.Min(1, MmdLookPresets.BuiltIn.Length - 1)].values;

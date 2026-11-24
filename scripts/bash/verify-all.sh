@@ -1,6 +1,6 @@
 #!/bin/bash
 # H1-04: one command for the scene regression suite. Builds the V0 Player once, then runs
-#   UI (217+ checks) + relaunched restore (14), scene file format (H1-05), repeated open
+#   UI (220+ checks) + relaunched restore (14), scene file format (H1-05), repeated open
 #   cancel/retry (H1-01) and crash recovery (H1-06), then prints one summary with the result
 #   locations and checks that the build left no tracked files modified.
 # Opens Player windows for several minutes (do not run while the user is gaming).
@@ -57,7 +57,7 @@ def checked(name, path, minimum=None, extra=None):
     if extra: e_ok, e_detail = extra(r); ok = ok and e_ok; detail += ', ' + e_detail
     if not r.get('success'): detail += ' | ' + (r.get('error') or '')[:300].replace('\n', ' ')
     add(name, path, ok, detail)
-checked('UI', os.path.join(ui, 'scene-ui.json'), 217)
+checked('UI', os.path.join(ui, 'scene-ui.json'), 220)
 checked('restore', os.path.join(ui, 'scene-restore.json'), 14)
 checked('format', 'artifacts/scene-format/%s-%s/scene-format.json' % (bk, cfg), 7)
 r, problem = load('artifacts/scene-cycle/%s-%s/scene-cycle.json' % (bk, cfg))

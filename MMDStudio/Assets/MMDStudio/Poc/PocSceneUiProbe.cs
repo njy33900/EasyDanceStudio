@@ -393,6 +393,34 @@ namespace MmdStudio.Poc
             }
             catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
             yield return new WaitForSecondsRealtime(.4f);
+            // The window cannot get smaller than the UI can use: the hook sits on the visible Player
+            // window, answers the limits Windows asks for, and a plain SetWindowPos shrink (what an edge
+            // drag does) stops at the minimum. Unity's own SetResolution result is recorded only.
+            var windowDetail = "";
+            try
+            {
+                var client = MmdWindowLimits.ClientSize();
+                var onPlayer = MmdWindowLimits.Installed && MmdWindowLimits.VisibleWindow && client.x == Screen.width && client.y == Screen.height;
+                var track = MmdWindowLimits.AskMinimumTrack();
+                var shrunk = MmdWindowLimits.ShrinkAndRestore(400, 300);
+                windowDetail = "player window " + onPlayer + " (client " + client.x + "x" + client.y + "), min track " + track.x + "x" + track.y +
+                    ", SetWindowPos 400x300 -> client " + shrunk.x + "x" + shrunk.y;
+                if (!(onPlayer && track.x >= MmdWindowLimits.MinClientWidth && track.y >= MmdWindowLimits.MinClientHeight &&
+                      shrunk.x >= MmdWindowLimits.MinClientWidth && shrunk.y >= MmdWindowLimits.MinClientHeight))
+                    throw new InvalidOperationException("window_keeps_minimum_size [" + windowDetail + "]");
+                Screen.SetResolution(400, 300, false);
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return new WaitForSecondsRealtime(.4f);
+            try
+            {
+                var afterSet = MmdWindowLimits.ClientSize();
+                Check("window_keeps_minimum_size [" + windowDetail + "; Unity SetResolution 400x300 -> Screen " + Screen.width + "x" + Screen.height +
+                    ", client " + afterSet.x + "x" + afterSet.y + "; messages " + MmdWindowLimits.MessagesSeen + ", clamped " + MmdWindowLimits.Clamped + "]", true);
+                Screen.SetResolution(1280, 720, false);
+            }
+            catch (Exception ex) { Finish(path, report, ex.ToString()); yield break; }
+            yield return new WaitForSecondsRealtime(.4f);
 
             // Full screen: F11 goes borderless at the resolution of the window's monitor; Esc comes
             // back to the window size it had. (The test window covers the screen for about a second.)
@@ -2427,9 +2455,10 @@ namespace MmdStudio.Poc
             catch (Exception ex) { fail(ex.ToString()); yield break; }
             yield return null;
             while (ui.Busy) yield return null;
+            var files = Enumerable.Range(0, 3).Select(i => Path.Combine(dir, "alpha_" + i.ToString("D6") + ".png")).ToArray();
+            byte[][] sequenceBefore = null; FileStream sequenceLock = null;
             try
             {
-                var files = Enumerable.Range(0, 3).Select(i => Path.Combine(dir, "alpha_" + i.ToString("D6") + ".png")).ToArray();
                 var ok = files.All(File.Exists) && !File.Exists(Path.Combine(dir, "alpha_000003.png")) && NoTemporaryFiles(dir);
                 var texture = ok ? LoadPng(files[1]) : null;
                 var pixels = texture != null ? texture.GetPixels32() : new Color32[0];
@@ -2440,7 +2469,24 @@ namespace MmdStudio.Poc
                     ok && texture.width == 480 && texture.height == 270 && corners && solid > 50 && clear > pixels.Length / 2 && stageBack &&
                     Camera.main.backgroundColor.a > .99f && Camera.main.allowHDR);
                 if (texture != null) Destroy(texture);
+                // 6b. All or nothing (v0.6 review 1): the same sequence again while one existing frame is
+                // locked fails, and every existing frame stays as it was (no mix, nothing left over).
+                sequenceBefore = files.Select(File.ReadAllBytes).ToArray();
+                sequenceLock = new FileStream(files[1], FileMode.Open, FileAccess.Read, FileShare.None);
                 ui.Graphics.Apply(savedGraphics);
+                var again = new OutputData { preset = OutputData.Custom, width = 480, height = 270, fps = 30 };
+                ui.StartOutput(MmdSceneWorkspace.OutputFormat.PngSequence, again, .5, .6, Path.Combine(dir, "alpha.png"));
+            }
+            catch (Exception ex) { sequenceLock?.Dispose(); fail(ex.ToString()); yield break; }
+            yield return null;
+            while (ui.Busy) yield return null;
+            try
+            {
+                sequenceLock.Dispose();
+                var unchanged = files.Select(File.ReadAllBytes).Zip(sequenceBefore, (x, y) => x.SequenceEqual(y)).All(same => same);
+                var nothingLeft = !File.Exists(Path.Combine(dir, "alpha_000003.png")) && NoTemporaryFiles(dir) &&
+                    !Directory.GetDirectories(dir).Any(d => Path.GetFileName(d).StartsWith("."));
+                Check("png_sequence_rewrite_is_all_or_nothing [" + ui.Error + "]", ui.Error.Contains("출력하지 못했습니다") && unchanged && nothingLeft);
                 // 7. The toolbar button and dialog (scripted file dialog).
                 Activate(ui.Root, "Output");
                 var dialogShown = ui.DialogVisible && ui.Root.Q<Label>("OutputSummary").text.Contains("프레임");
@@ -2801,6 +2847,40 @@ namespace MmdStudio.Poc
             var distinct = luminance.Zip(luminance.Skip(1), (x, y) => Math.Abs(x - y)).All(d => d > 5);
             Check("look_preset_reference_frames_rendered_and_distinct [" + string.Join(", ", luminance.Select(v => v.ToString("0.0"))) + "]",
                 distinct && Enumerable.Range(0, MmdLookPresets.BuiltIn.Length).All(i => File.Exists(Path.Combine(reportDirectory, "look-" + i + ".png"))));
+
+            // 2026-11-24 (the user's graphics reference): the "밝은 스튜디오" look (applied last above)
+            // gives every character its soft toon values and turns the environment light on; the
+            // environment fill brightens the toon shadow side, the softness changes the shading, and
+            // undoing the preset gives the scene its own ambient back.
+            var studio = MmdLookPresets.BuiltIn.Last();
+            var toonValues = studio.characterToonValues && characters.All(o => o.MaterialStyle.style == MaterialStyleData.Toon &&
+                Near(o.MaterialStyle.shadowSoftness, studio.characterToon.shadowSoftness) && Near(o.MaterialStyle.ambient, studio.characterToon.ambient) &&
+                Near(o.MaterialStyle.outlineWidth, studio.characterToon.outlineWidth));
+            var ambientOn = graphics.AmbientOverridden && RenderSettings.ambientMode == UnityEngine.Rendering.AmbientMode.Flat &&
+                Near((Color)RenderSettings.ambientLight, studio.values.ambientColor * studio.values.ambientIntensity);
+            float Light(Color32[] pixels) => pixels.Sum(p => p.r + p.g + p.b) / (float)pixels.Length;
+            var lookTarget = characters[0];
+            var studioToon = lookTarget.MaterialStyle.Clone();
+            // Framed on the characters (the view is far out at this point of the run), restored afterwards.
+            var lookView = (ui.View.Pivot, ui.View.Yaw, ui.View.Pitch, ui.View.Distance, ui.View.Roll);
+            ui.FrameIds(characters.Select(o => o.Id).ToArray());
+            Activate(ui.Root, "explorer-light"); // no selection highlight in the measured frames
+            ui.UpdateDofFocus();
+            SaveRendered(camera, Path.Combine(reportDirectory, "look-" + (MmdLookPresets.BuiltIn.Length - 1) + "-characters.png"));
+            var filled = RenderedPixels(camera);
+            var unfilledStyle = studioToon.Clone(); unfilledStyle.ambient = 0; ui.Scene.SetMaterialStyle(lookTarget.Id, unfilledStyle);
+            var unfilled = RenderedPixels(camera);
+            var hardStyle = unfilledStyle.Clone(); hardStyle.shadowSoftness = .01f; ui.Scene.SetMaterialStyle(lookTarget.Id, hardStyle);
+            var hard = RenderedPixels(camera);
+            ui.Scene.SetMaterialStyle(lookTarget.Id, studioToon);
+            ui.View.Set(lookView.Pivot, lookView.Yaw, lookView.Pitch, lookView.Distance, lookView.Roll); ui.View.Apply(camera);
+            var fillChanged = PixelsChanged(filled, unfilled); var softChanged = PixelsChanged(unfilled, hard);
+            var brighter = Light(filled) > Light(unfilled);
+            ui.Undo(); // back to the previous preset and the characters' earlier toon values
+            var restored = !graphics.AmbientOverridden && characters.All(o => !Near(o.MaterialStyle.shadowSoftness, studio.characterToon.shadowSoftness));
+            Check("studio_look_soft_toon_and_environment_light [fill changed " + fillChanged + " px, brighter " + Light(unfilled).ToString("0.0") + "->" + Light(filled).ToString("0.0") +
+                ", softness changed " + softChanged + " px, toon=" + toonValues + " ambient=" + ambientOn + " restored=" + restored + "]",
+                toonValues && ambientOn && fillChanged > 20 && brighter && softChanged > 20 && restored);
         }
         private static bool Near(Vector3 x, Vector3 y, float tolerance = 1e-3f) => (x - y).magnitude <= tolerance;
         private static bool Near(float x, float y, float tolerance = 1e-3f) => Math.Abs(x - y) <= tolerance;

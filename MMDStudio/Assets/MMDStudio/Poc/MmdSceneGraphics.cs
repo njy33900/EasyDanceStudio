@@ -46,6 +46,10 @@ namespace MmdStudio.Poc
         public bool vignetteEnabled;
         public float vignetteIntensity = .3f;
         public MmdEffectQuality effectQuality = MmdEffectQuality.Medium;
+        // 2026-11-24 (additive): environment (ambient) light, a flat fill from every direction that
+        // lit materials (toon with "환경광 받기", PBR backgrounds) pick up. 0 keeps the scene's own.
+        public float ambientIntensity;
+        public Color ambientColor = new Color(.85f, .9f, 1f);
         // H2a-05: name of the look preset these values came from ("" = none); the values above are authoritative.
         public string lookPreset = "";
         public List<SavedView> savedViews = new List<SavedView>();
@@ -73,6 +77,7 @@ namespace MmdStudio.Poc
             Range(dofDistance, .1f, 100, "초점 거리는 0.1~100 m여야 합니다."); Range(dofStrength, 0, 1, "흐림 강도는 0~1이어야 합니다.");
             Range(ssaoIntensity, 0, 4, "SSAO 강도는 0~4여야 합니다."); Range(ssaoRadius, .05f, 2, "SSAO 반경은 0.05~2 m여야 합니다.");
             Range(vignetteIntensity, 0, 1, "비네트 강도는 0~1이어야 합니다.");
+            Range(ambientIntensity, 0, 2, "환경광 강도는 0~2여야 합니다."); Colour(ambientColor, "환경광 색");
             if (!Enum.IsDefined(typeof(MmdEffectQuality), effectQuality)) throw new ArgumentOutOfRangeException(nameof(effectQuality), "효과 품질 값이 올바르지 않습니다.");
             if (savedViews == null || savedViews.Count > MaxSavedViews) throw new ArgumentOutOfRangeException(nameof(savedViews), "저장된 시점은 최대 " + MaxSavedViews + "개입니다.");
             foreach (var view in savedViews)
@@ -177,9 +182,38 @@ namespace MmdStudio.Poc
             Dof.highQualitySampling.value = next.effectQuality != MmdEffectQuality.Low;
             Vignette.intensity.value = next.vignetteEnabled ? next.vignetteIntensity : 0;
             Vignette.smoothness.value = .4f; Vignette.color.value = Color.black; Vignette.rounded.value = false;
+            ApplyAmbient(next);
             ApplySsao(next);
             current = next;
             ApplyFocus();
+        }
+
+        // Environment light: a flat ambient (colour x intensity) written straight into the ambient
+        // probe that shaders sample; intensity 0 puts back what the scene had.
+        private bool sceneAmbientKept;
+        private AmbientMode sceneAmbientMode;
+        private Color sceneAmbientLight;
+        private SphericalHarmonicsL2 sceneAmbientProbe;
+        internal bool AmbientOverridden { get; private set; }
+        private void ApplyAmbient(SceneGraphicsSettings next)
+        {
+            if (!sceneAmbientKept)
+            {
+                sceneAmbientKept = true;
+                sceneAmbientMode = RenderSettings.ambientMode; sceneAmbientLight = RenderSettings.ambientLight; sceneAmbientProbe = RenderSettings.ambientProbe;
+            }
+            if (next.ambientIntensity <= 0)
+            {
+                if (!AmbientOverridden) return;
+                RenderSettings.ambientMode = sceneAmbientMode; RenderSettings.ambientLight = sceneAmbientLight; RenderSettings.ambientProbe = sceneAmbientProbe;
+                AmbientOverridden = false;
+                return;
+            }
+            var colour = new Color(next.ambientColor.r, next.ambientColor.g, next.ambientColor.b, 1) * next.ambientIntensity;
+            var probe = new SphericalHarmonicsL2();
+            probe.AddAmbientLight(colour.linear);
+            RenderSettings.ambientMode = AmbientMode.Flat; RenderSettings.ambientLight = colour; RenderSettings.ambientProbe = probe;
+            AmbientOverridden = true;
         }
 
         // Focus target distance (camera-space depth); null returns to the fixed distance.
@@ -237,6 +271,7 @@ namespace MmdStudio.Poc
         private void OnDestroy()
         {
             if (profile != null) Destroy(profile);
+            if (AmbientOverridden) { RenderSettings.ambientMode = sceneAmbientMode; RenderSettings.ambientLight = sceneAmbientLight; RenderSettings.ambientProbe = sceneAmbientProbe; }
 #if UNITY_EDITOR
             // Play mode in the editor edits the renderer asset itself: put the template values back.
             if (Ssao != null && ssaoOriginal != null) UnityEditor.EditorJsonUtility.FromJsonOverwrite(ssaoOriginal, Ssao);

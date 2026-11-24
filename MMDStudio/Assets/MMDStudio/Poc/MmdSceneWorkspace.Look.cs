@@ -102,10 +102,16 @@ namespace MmdStudio.Poc
             Record("룩 프리셋", null, () =>
             {
                 Graphics.Apply(next);
-                // H2b-01: the preset's character style (toon keeps each character's own toon values).
+                // H2b-01: the preset's character style (toon keeps each character's own toon values,
+                // unless the preset carries its own: then every character takes those).
                 if (preset.characterStyle == MaterialStyleData.Toon)
                     foreach (var item in Scene.Objects.Where(o => o.Kind == MmdSceneService.ObjectKind.Character).ToArray())
-                        if (item.MaterialStyle.style != MaterialStyleData.Toon)
+                        if (preset.characterToonValues)
+                        {
+                            var style = preset.characterToon.Clone(); style.style = MaterialStyleData.Toon;
+                            Scene.SetMaterialStyle(item.Id, style);
+                        }
+                        else if (item.MaterialStyle.style != MaterialStyleData.Toon)
                         {
                             var style = item.MaterialStyle.Clone(); style.style = MaterialStyleData.Toon;
                             Scene.SetMaterialStyle(item.Id, style);

@@ -306,14 +306,41 @@ namespace MmdStudio.Poc
         {
             if (format == OutputFormat.PngSequence)
             {
-                // The whole sequence exists before any file reaches the target folder.
+                // All or nothing (v0.6 review 1): the whole sequence exists before any file reaches
+                // the target folder; existing frames of the same names are moved aside first, the new
+                // ones moved in, and any failure (a locked or read-only frame, a full disk) puts every
+                // file back as it was. The set-aside frames are deleted only after success.
                 var directory = Path.GetDirectoryName(path);
-                foreach (var file in written)
+                var aside = temporary + ".previous";
+                var setAside = new List<(string final, string backup)>(); var placed = new List<string>();
+                try
                 {
-                    var final = Path.Combine(directory, Path.GetFileName(file));
-                    if (File.Exists(final)) File.Delete(final);
-                    File.Move(file, final);
+                    foreach (var file in written)
+                    {
+                        var final = Path.Combine(directory, Path.GetFileName(file));
+                        if (!File.Exists(final)) continue;
+                        Directory.CreateDirectory(aside);
+                        var backup = Path.Combine(aside, Path.GetFileName(file));
+                        File.Move(final, backup); setAside.Add((final, backup));
+                    }
+                    foreach (var file in written)
+                    {
+                        var final = Path.Combine(directory, Path.GetFileName(file));
+                        File.Move(file, final); placed.Add(final);
+                    }
                 }
+                catch (Exception ex)
+                {
+                    foreach (var final in placed) { try { File.Delete(final); } catch (Exception cleanup) { Debug.LogWarning("Output rollback: " + cleanup.Message); } }
+                    var kept = 0;
+                    foreach (var (final, backup) in setAside)
+                    {
+                        try { File.Move(backup, final); } catch (Exception restore) { kept++; Debug.LogWarning("Output rollback: " + restore.Message); }
+                    }
+                    if (kept == 0) { try { if (Directory.Exists(aside)) Directory.Delete(aside, true); } catch (Exception cleanup) { Debug.LogWarning("Output rollback: " + cleanup.Message); } }
+                    throw new IOException(ex.Message + (kept > 0 ? " · 되돌리지 못한 기존 프레임 " + kept + "개는 " + aside + "에 있습니다" : ""), ex);
+                }
+                if (Directory.Exists(aside)) Directory.Delete(aside, true);
                 Directory.Delete(temporary, true);
                 return;
             }
