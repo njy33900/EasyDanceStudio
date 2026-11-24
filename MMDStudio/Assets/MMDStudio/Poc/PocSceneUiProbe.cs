@@ -2884,6 +2884,34 @@ namespace MmdStudio.Poc
             Check("studio_look_soft_toon_and_environment_light [fill changed " + fillChanged + " px, brighter " + Light(unfilled).ToString("0.0") + "->" + Light(filled).ToString("0.0") +
                 ", softness changed " + softChanged + " px, toon=" + toonValues + " ambient=" + ambientOn + " restored=" + restored + "]",
                 toonValues && ambientOn && fillChanged > 20 && brighter && softChanged > 20 && restored);
+
+            // 2026-11-24: runtime textures are mipmapped (and anisotropic): seen from further away they
+            // change less when the camera moves a fraction of a pixel than the same textures forced
+            // to level 0 (no mipmaps). Effects with noise or blur are off for the measurement.
+            var sceneTextures = ui.Scene.Objects.SelectMany(o => o.Model.texturesByIndex).Where(t => t != null && (t.width > 1 || t.height > 1)).Distinct().ToArray();
+            var mipmapped = sceneTextures.Length > 0 && sceneTextures.All(t => t.mipmapCount > 1 && t.anisoLevel == MmdStagedPmxBuild.AnisoLevel && t.filterMode == FilterMode.Trilinear);
+            var keepLook = graphics.Settings; var steady = keepLook.Clone(); steady.ssaoEnabled = false; steady.dofEnabled = false; steady.bloomEnabled = false;
+            graphics.Apply(steady);
+            var shimmerView = (ui.View.Pivot, ui.View.Yaw, ui.View.Pitch, ui.View.Distance, ui.View.Roll);
+            ui.FrameIds(characters.Select(o => o.Id).ToArray()); ui.View.Zoom(-5); ui.View.Apply(camera);
+            float Shimmer(float bias)
+            {
+                foreach (var texture in sceneTextures) texture.mipMapBias = bias;
+                var start = (ui.View.Pivot, ui.View.Yaw, ui.View.Pitch, ui.View.Distance, ui.View.Roll);
+                var first = RenderedPixels(camera, 960, 540);
+                ui.View.Orbit(new Vector2(.2f, 0)); ui.View.Apply(camera);
+                var second = RenderedPixels(camera, 960, 540);
+                ui.View.Set(start.Pivot, start.Yaw, start.Pitch, start.Distance, start.Roll); ui.View.Apply(camera);
+                double sum = 0;
+                for (var i = 0; i < first.Length; i++) sum += Math.Abs(first[i].r - second[i].r) + Math.Abs(first[i].g - second[i].g) + Math.Abs(first[i].b - second[i].b);
+                return (float)(sum / first.Length);
+            }
+            var withMips = Shimmer(0); var levelZero = Shimmer(-16);
+            foreach (var texture in sceneTextures) texture.mipMapBias = 0;
+            ui.View.Set(shimmerView.Pivot, shimmerView.Yaw, shimmerView.Pitch, shimmerView.Distance, shimmerView.Roll); ui.View.Apply(camera);
+            graphics.Apply(keepLook);
+            Check("mipmapped_textures_shimmer_less_when_far [" + sceneTextures.Length + " textures, mipmapped " + mipmapped + ", change per pixel " + withMips.ToString("0.000") +
+                " vs " + levelZero.ToString("0.000") + " at level 0]", mipmapped && withMips < levelZero);
         }
         private static bool Near(Vector3 x, Vector3 y, float tolerance = 1e-3f) => (x - y).magnitude <= tolerance;
         private static bool Near(float x, float y, float tolerance = 1e-3f) => Math.Abs(x - y) <= tolerance;

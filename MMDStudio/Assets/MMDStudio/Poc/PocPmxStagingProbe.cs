@@ -29,6 +29,9 @@ namespace MmdStudio.Poc
             public string[] stagedTimings;
             // The slowest frames of the staged load and the loading stage shown during each.
             public string[] slowestFrames;
+            // 2026-11-24: staged textures carry a mip chain, trilinear and anisotropic filtering.
+            public bool mipmapped;
+            public string mipmapSummary;
         }
         [Serializable] private sealed class Report
         {
@@ -124,7 +127,11 @@ namespace MmdStudio.Poc
                         if (a != b && mismatches.Count < 20) mismatches.Add("reference: " + a + "\n   staged: " + b);
                     }
                     result.mismatches = mismatches.ToArray();
-                    result.identical = mismatches.Count == 0;
+                    var real = staged.texturesByIndex.Where(texture => texture != null && (texture.width > 1 || texture.height > 1)).Distinct().ToArray();
+                    result.mipmapped = real.All(texture => texture.mipmapCount > 1 && texture.filterMode == FilterMode.Trilinear && texture.anisoLevel == MmdStagedPmxBuild.AnisoLevel);
+                    result.mipmapSummary = real.Length + " textures, mips " + string.Join(",", real.Select(texture => texture.mipmapCount).Distinct().OrderBy(n => n)) +
+                        ", unmipmapped " + real.Count(texture => texture.mipmapCount <= 1);
+                    result.identical = mismatches.Count == 0 && result.mipmapped;
                 }
                 catch (Exception ex) { Release(reference); Release(staged); Finish(reportPath, report, results, "Staged import failed: " + path + "\n" + ex); yield break; }
                 Release(reference); Release(staged);
@@ -234,7 +241,8 @@ namespace MmdStudio.Poc
             {
                 var texture = result.texturesByIndex[i];
                 lines.Add("texture[" + i + "]: " + (texture == null ? "null" :
-                    texture.name + " " + texture.width + "x" + texture.height + " " + texture.format + " mips " + texture.mipmapCount + " " + PixelHash(texture)));
+                    // Level-0 content and size; format and mip chain differ on purpose (staged textures are mipmapped).
+                    texture.name + " " + texture.width + "x" + texture.height + " " + PixelHash(texture)));
             }
             for (var i = 0; i < result.materials.Count; i++) lines.Add("material[" + i + "]: " + Describe(result.materials[i]));
             foreach (var renderer in result.root.GetComponentsInChildren<SkinnedMeshRenderer>(true))

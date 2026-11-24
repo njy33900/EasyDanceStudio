@@ -124,7 +124,7 @@ namespace MmdStudio.Poc
                 }
                 var bytes = await Task.Run(() => File.ReadAllBytes(fullPath), cancellationToken);
                 var step = Stopwatch.StartNew();
-                var texture = DecodeTexture(fullPath, bytes, mainTextures.Contains(i), out var sourcePixels);
+                var texture = WithMipmaps(DecodeTexture(fullPath, bytes, mainTextures.Contains(i), out var sourcePixels));
                 pixelsByIndex[i] = sourcePixels;
                 if (texture == null) Warn("Texture could not be decoded: " + fullPath);
                 else
@@ -176,7 +176,8 @@ namespace MmdStudio.Poc
                 }
                 return texture;
             }
-            var decoded = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+            // Created with a mip chain: LoadImage then builds the mipmaps natively (WithMipmaps).
+            var decoded = new Texture2D(2, 2, TextureFormat.RGBA32, true);
             var ok = ImageConversion.LoadImage(decoded, bytes);
             // SourcePixelCache reads the pixels of its own throwaway LoadImage texture even when
             // decoding fails, so the alpha detection input is taken the same way here.
@@ -184,6 +185,27 @@ namespace MmdStudio.Poc
             if (ok && !discardTexture) return decoded;
             UnityEngine.Object.Destroy(decoded);
             return null;
+        }
+
+        // 2026-11-24: runtime textures get a mip chain (no shimmering when they are far away or
+        // seen at a grazing angle) and anisotropic filtering (sharp floors). PNG/JPG already decode
+        // into a mipmapped texture; TGA/BMP from the package decoders are copied into one (level 0
+        // keeps exactly the decoded pixels). Textures stay readable: toon ramps are read on the CPU.
+        internal const int AnisoLevel = 8;
+        private static Texture2D WithMipmaps(Texture2D texture)
+        {
+            if (texture == null) return null;
+            if (texture.mipmapCount <= 1 && (texture.width > 1 || texture.height > 1))
+            {
+                var copy = new Texture2D(texture.width, texture.height, TextureFormat.RGBA32, true) { wrapMode = texture.wrapMode };
+                copy.SetPixels32(texture.GetPixels32());
+                copy.Apply(true);
+                UnityEngine.Object.Destroy(texture);
+                texture = copy;
+            }
+            texture.filterMode = FilterMode.Trilinear;
+            texture.anisoLevel = AnisoLevel;
+            return texture;
         }
 
         private static void FlipRowsInPlace(Color32[] pixels, int width, int height)

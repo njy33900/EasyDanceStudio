@@ -23,6 +23,7 @@ print('fresh',os.path.getmtime(p)>=int(sys.argv[2]),'success',r['success'],r['ba
 print(r['error'][:800])
 for m in r['models'] or []:
   print('%-40s identical=%s tex=%d mat=%d compared=%d shared=%d | reference %.0f ms | staged %.0f ms, worst frame %.1f ms, %d frames' % (os.path.basename(m['path']).encode('ascii','replace').decode(), m['identical'], m['textures'], m['materials'], m['compared'], m['sharedNameMaterials'], m['referenceMilliseconds'], m['stagedMilliseconds'], m['stagedWorstFrameMilliseconds'], m['stagedFrames']))
+  print('     mipmapped', m.get('mipmapped'), m.get('mipmapSummary'))
   for t in m['stagedTimings'] or []: print('     ', t)
   for t in m.get('slowestFrames') or []: print('     slow', t)
   for x in (m['mismatches'] or [])[:5]: print('   MISMATCH', x[:600].encode('ascii','replace').decode())
