@@ -2630,7 +2630,10 @@ namespace MmdStudio.Poc
                 var other = File.ReadAllBytes(ui.Scene.CameraMotion.Source);
                 var umtReads = false;
                 try { using (new DisposableCamera(MmdPocCamera.Load(ui.Scene.CameraMotion.Source))) umtReads = true; } catch (Exception) { umtReads = false; }
-                Check("auto_camera_same_seed_same_vmd_and_standard_format [" + first.Length + " bytes]", first.SequenceEqual(again) && !first.SequenceEqual(other) &&
+                // v0.6 review 17: the hash lets the IL2CPP and Mono reports be compared byte for byte.
+                string sha;
+                using (var hasher = System.Security.Cryptography.SHA256.Create()) sha = BitConverter.ToString(hasher.ComputeHash(first)).Replace("-", "").Substring(0, 16);
+                Check("auto_camera_same_seed_same_vmd_and_standard_format [" + first.Length + " bytes, sha256 " + sha + "]", first.SequenceEqual(again) && !first.SequenceEqual(other) &&
                     ui.Scene.CameraMotion.Source.EndsWith(".autocam-8.vmd") && umtReads);
                 // The character's head stays in a 16:9 frame through the whole song.
                 var motion = ui.Scene.CameraMotion; var inside = 0; var samples = 0; var seconds = ui.Scene.Seconds;
